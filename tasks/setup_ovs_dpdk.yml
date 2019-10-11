@@ -1,0 +1,414 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+- name: Config Check; Verify host_description are defined
+  fail:
+    msg: "Dict host_description is not defined"
+  when: host_description is undefined
+
+- name: Config Check; Verify numa_nodes
+  fail:
+    msg: "Dict numa_nodes is not defined in host_description"
+  when: host_description.numa_nodes is not defined
+
+- name: Config Check; Verify one or more NUMA nodes are defined
+  fail:
+    msg: "Define one or more NUMA nodes"
+  when: not host_description['numa_nodes'] or
+        host_description['numa_nodes'] | length == 0
+
+- name: Config Check; Verify bridge mapping available
+  fail:
+    msg: "No bridge mapping is defined"
+  when: host_description.bridge_mappings is not defined
+
+- name: Config Check; Verify at least one bridge is defined
+  fail:
+    msg: "No bridge is defined"
+  when: host_description['bridge_mappings'] | length == 0
+
+- name: Config Check; Verify all bridges have at least one interface
+  fail:
+    msg: "A bridge does not have an interface"
+  with_dict: "{{ host_description['bridge_mappings'] }}"
+  loop_control:
+    loop_var: bridge_map
+  when: bridge_map.values() | list | length == 0 or not bridge_map.values() | list
+
+- name: Config Check; Verify each interface has a PCI address
+  fail:
+    msg: "An interface has no associated PCI address"
+  with_items:
+    - "{{ host_description['numa_nodes'].keys() | list }}"
+  when: "host_description['numa_nodes'][item].interfaces is defined and
+        ( not host_description['numa_nodes'][item]['interfaces'].values() | list or
+        'pci_address' not in
+         host_description['numa_nodes'][item]['interfaces'].values() | list | first )"
+
+- name: Config Check; Verify dpdk_socket_mem is defined for each NUMA node
+  fail:
+    msg: "NUMA node {{ numa_node.key }} does not have dpdk_socket_mem defined"
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  loop_control:
+    loop_var: numa_node
+  when: numa_node.value.dpdk_socket_mem is not defined
+
+- name: Config Check; Ensure bridge mappings have associated interface
+        definition - register defined bridge interfaces
+  set_fact:
+    bridge_ints: "{{ bridge_ints | default([]) + [bridge_interface] }}"
+  with_list:
+    - "{{ host_description['bridge_mappings'].values() | list }}"
+  loop_control:
+    loop_var: bridge_interface
+
+- name: Config Check; Ensure bridge mappings have associated interface
+        definition - register defined interfaces
+  set_fact:
+    defined_ints: "{{ (defined_ints | default([])) | union(numa_ints.value.interfaces.keys() | list) }}"
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  loop_control:
+    loop_var: numa_ints
+  when: numa_ints.value.interfaces is defined
+
+- name: Config Check; Ensure bridge mappings have associated interface
+        definition - Perform check
+  fail:
+    msg: "Bridge interface {{ item }} does not have a definition"
+  with_items: "{{ bridge_ints | list }}"
+  when: item not in defined_ints
+
+- name: Check if we have required SST-BF information
+  fail:
+    msg: "Variable {{ required_var }} is not defined"
+  with_items:
+    - "normal_cores"
+    - "high_cores"
+  loop_control:
+    loop_var: required_var
+  when: vars[required_var] is undefined
+
+- name: Setup information
+  set_fact:
+    high_cores_l: "{{ high_cores.stdout_lines[0].split(',') }}"
+    normal_cores_l: "{{ normal_cores.stdout_lines[0].split(',') }}"
+    pinned_cores_l: []
+
+#Note: igb_uio kernel module needs special compilation from source
+#      which is achieved with the package below on Ubuntu 18.04
+- name: Setup igb_uio kernel module on Ubuntu 18.04
+  block:
+    - name: Ensure we have dpdk-igb-uio-dkms installed
+      apt:
+        name: dpdk-igb-uio-dkms
+        state: present
+
+    - name: Ensure we have igb_uio module
+      modprobe:
+        name: igb_uio
+        state: present
+  when: ansible_distribution == 'Ubuntu' and
+        ansible_distribution_version == '18.04' and
+        ovs_dpdk_driver == 'igb_uio'
+
+# Note: To use igb_uio kernel module on Ubuntu 16.04, you need to build DPDK
+#       from source on Ubuntu 16.04. This task is a check to ensure its is completed.
+- name: Setup igb_uio kernel module on Ubuntu 16.04
+  block:
+    - name: Ensure we have igb_uio module
+      modprobe:
+        name: igb_uio
+        state: present
+  when: ansible_distribution == 'Ubuntu' and
+        ansible_distribution_version == '16.04' and
+        ovs_dpdk_driver == 'igb_uio'
+
+- name: Get total amount of CPUs to pin
+  set_fact:
+    total_cpus_pin: "{{ (total_cpus_pin | default(0) | int) + \
+                    (numa_id.value.no_physical_cores_pinned | default(0) | int) }}"
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  loop_control:
+    loop_var: numa_id
+
+- name: Ensure we are pinning one or more cores in total
+  fail:
+    msg: "Please define one or more cores for pinning"
+  when: total_cpus_pin | int < 1
+
+# Note: We assume two threads per core here
+- name: Fail if there is not enough high cpu resources
+  fail:
+    msg: "Not enough cpu resources to cover high cpu pinning request"
+  when: ovs_core_high_priority and
+        total_cpus_pin | int * 2 > high_cores_l | length
+
+- name: Fail if there is not enough normal cpu resources
+  fail:
+    msg: "Not enough cpu resources to cover normal cpu pinning request"
+  when: not ovs_core_high_priority and
+        total_cpus_pin | int * 2 > normal_cores_l | length
+
+- name: Get high or normal priority OVS-DPDK PMD core(s) for each NUMA node
+  include: get_cores.yml
+  vars:
+    numa_no: "{{ numa_node.key }}"
+    no_cores_pinned: " {{ numa_node.value.no_physical_cores_pinned }}"
+    sibling_needed: true
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  loop_control:
+    loop_var: numa_node
+  when: numa_node.value.no_physical_cores_pinned > 0
+
+- name: Store list of cores that are pinned
+  set_fact:
+    ovs_dpdk_pmd_core_l: "{{ pinned_cores_l }}"
+
+- name: Register supporting python script
+  stat:
+    path: "{{ role_path }}/files/convert_cpu_hex.py"
+  register: support_hex_stat
+
+- name: Check for symbolic link attack
+  fail:
+    msg: "Possible symbolic link attack detected for file at files/convert_cpu_hex.py"
+  when: support_hex_stat.stat.exists and support_hex_stat.stat.islnk
+
+- name: Generate hex for pinning OVS-DPDK PMD
+  script: "{{ role_path }}/files/convert_cpu_hex.py {{ pinned_cores_l | join(',') }}"
+  delegate_to: 127.0.0.1
+  register: ovs_dpdk_pmd_mask
+
+- name: Set up to get DPDK lcore mask
+  set_fact:
+    pinned_cores_l: []
+
+- name: Get normal priority OVS-DPDK lcore
+  include: get_core.yml
+  vars:
+    numa_no: 0
+    sibling_needed: false
+    ovs_core_high_priority: false
+
+- name: Generate hex for pinning OVS-DPDK lcore
+  script: "{{ role_path }}/files/convert_cpu_hex.py {{ pinned_cores_l | join(',') }}"
+  delegate_to: 127.0.0.1
+  register: ovs_dpdk_lcore_mask
+
+- name: Add kernel module to /etc/modules
+  lineinfile:
+    path: /etc/modules
+    line: "{{ ovs_dpdk_driver }}"
+    regexp: "^{{ ovs_dpdk_driver }}"
+    state: present
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Add kernel module to /etc/modules-load.d
+  lineinfile:
+    path: /etc/modules-load.d/ovs-dpdk
+    line: "{{ ovs_dpdk_driver }}"
+    regexp: "^{{ ovs_dpdk_driver }}"
+    state: present
+  when: ansible_distribution == 'Fedora' or
+        ansible_distribution == 'CentOS' or
+        ansible_distribution == 'RedHat'
+
+- name: Add openvswitch module to /etc/modules
+  lineinfile:
+    path: /etc/modules
+    line: 'openvswitch'
+    regexp: '^openvswitch'
+    state: present
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Check if GRUB_CMDLINE_LINUX present from GRUB file
+  lineinfile:
+    dest: /etc/default/grub
+    regexp: "^GRUB_CMDLINE_LINUX="
+    state: absent
+  check_mode: yes
+  register: grub
+
+- name: Insert GRUB_CMDLINE_LINUX
+  lineinfile:
+    dest: /etc/default/grub
+    line: GRUB_CMDLINE_LINUX=""
+  when: not grub.changed
+
+- name: Remove GRUB CMD line key-values we are replacing
+  replace:
+    path: /etc/default/grub
+    regexp: "{{ item }}=[']?[a-zA-Z0-9,-]+[']?"
+    replace: ""
+  loop:
+    - "default_hugepagesz"
+    - "hugepagesz"
+    - "hugepages"
+    - "isolcpus"
+    - "intel_iommu"
+    - "iommu"
+
+- name: Insert GRUB_CMDLINE_LINUX in GRUB with hugepage & isolcpus
+  replace:
+    path: /etc/default/grub
+    regexp: '(^GRUB_CMDLINE_LINUX=\"(.*)?)(\")'
+    replace: '\1default_hugepagesz=1G hugepagesz=1G
+           hugepages={{ ovs_dpdk_nr_1g_pages }} hugepagesz=2M
+           hugepages={{ ovs_dpdk_nr_2m_pages }}
+           isolcpus={{ ovs_dpdk_pmd_core_l| join(",") }} iommu=pt intel_iommu=on\3'
+  when: ansible_distribution == 'Ubuntu' or
+        ansible_distribution == 'Fedora' or
+        ansible_distribution == 'CentOS' or
+        ansible_distribution == 'RedHat'
+
+- name: Update grub
+  command: update-grub
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Update grub
+  shell: grub2-mkconfig -o "$(readlink -e /etc/grub2.conf)"
+  when: ansible_distribution == 'Fedora' or
+        ansible_distribution == 'CentOS' or
+        ansible_distribution == 'RedHat'
+
+- name: Reboot
+  shell: "sleep 1 && shutdown -r now 'Ansible update to GRUB - forced restart'"
+  changed_when: true
+  async: 1
+  poll: 0
+
+- name: Wait for reboot to complete
+  wait_for_connection:
+    connect_timeout: 20
+    sleep: 5
+    delay: 5
+    timeout: 600
+
+- name: Install OVS-DPDK packages for Ubuntu
+  apt:
+    name: "{{ packages }}"
+  vars:
+    packages:
+      - openvswitch-common
+      - openvswitch-switch-dpdk
+  when: ansible_distribution == 'Ubuntu' and
+        not ovs_dpdk_installed|default(true)|bool
+
+- name: Set alternative ovs-vswitchd service
+  alternatives:
+    name: ovs-vswitchd
+    path: /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
+  when: not ovs_dpdk_installed|default(true)|bool
+
+- name: Configure DPDK interface for driver bindings
+  template:
+    src: dpdk_interfaces.j2
+    dest: "/etc/dpdk/interfaces"
+    owner: "root"
+    group: "root"
+
+- name: Configure DPDK hugepage allocation
+  template:
+    src: dpdk.conf.j2
+    dest: "/etc/dpdk/dpdk.conf"
+    owner: "root"
+    group: "root"
+
+- name: Ensure DPDK service is running
+  systemd:
+    name: "{{ dpdk_service_name }}"
+    state: restarted
+    enabled: yes
+
+- name: Ensure Open vSwitch is running
+  systemd:
+    name: "{{ ovs_service_name }}"
+    state: restarted
+    enabled: yes
+
+- name: Pause for 5 seconds to ensure services have time to come back up
+  pause:
+    seconds: 5
+
+- name: Set DPDK lcore mask
+  command: "ovs-vsctl --no-wait set Open_vSwitch . \
+            other_config:dpdk-lcore-mask='{{ ovs_dpdk_lcore_mask.stdout_lines[0] }}'"
+  changed_when: true
+
+- name: Set DPDK PMD mask
+  command: "ovs-vsctl --no-wait set Open_vSwitch . \
+            other_config:pmd-cpu-mask='{{ ovs_dpdk_pmd_mask.stdout_lines[0] }}'"
+  changed_when: true
+
+- name: Generate total socket memory string for dpdk
+  set_fact:
+    ovs_dpdk_socket_mem_mb: "{{ ovs_dpdk_socket_mem_mb|default('')|string + \
+                                ',' + numa_id.value.dpdk_socket_mem|string }}"
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  loop_control:
+    loop_var: numa_id
+
+- name: Set DPDK socket memory
+  command: "ovs-vsctl --no-wait set Open_vSwitch . \
+            other_config:dpdk-socket-mem='{{ ovs_dpdk_socket_mem_mb[1:] }}'"
+  changed_when: true
+
+- name: Enable DPDK support for Open vSwitch
+  command: "ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-init=true"
+  changed_when: true
+
+- name: Create vhost_socket directory
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "libvirt-qemu"
+    group: "{{ vhost_socket_directory_group }}"
+    mode: "0755"
+  with_items:
+    - "/var/lib/vhost_socket"
+  when: vhost_socket_directory_group is defined
+
+- name: Setup network provider bridges
+  openvswitch_bridge:
+    bridge: "{{ bridge.key }}"
+    set: "bridge {{ bridge.key }} datapath_type='{{ ovs_datapath }}'"
+    fail_mode: secure
+    state: present
+  with_dict: "{{ host_description['bridge_mappings'] }}"
+  loop_control:
+    loop_var: bridge
+
+- name: Get Interface's pci address
+  set_fact:
+    "{{ item[0] }}_pci_addr": "{{ item[1]['interfaces'][ item[0] ]['pci_address'] | trim }}"
+  with_nested:
+    - "{{ host_description['bridge_mappings'].values() | list }}"
+    - "{{ host_description['numa_nodes'].values() | list }}"
+  when: >
+    item[1].interfaces is defined and
+    item[0] in item[1]['interfaces'] and
+    item[1]['interfaces'][item[0]].pci_address is defined
+
+# Note: Presently, we can only bind to a single interface
+- name: Add ports to network provider bridges
+  openvswitch_port:
+    bridge: "{{ bridge_map.key }}"
+    port: "{{ bridge_map.value }}"
+    set: "Interface {{ bridge_map.value }} type={{ ovs_dpdk_interface_type }} \
+          options:dpdk-devargs='{{ lookup('vars',bridge_map.value + '_pci_addr') }}'"
+    state: present
+  with_dict: "{{ host_description['bridge_mappings'] }}"
+  loop_control:
+    loop_var: bridge_map

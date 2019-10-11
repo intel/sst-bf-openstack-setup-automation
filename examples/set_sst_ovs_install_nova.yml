@@ -1,0 +1,48 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+# Additional variables will need to be defined in group vars or any other
+# ansible mechanism for defining vars. Please see defaults.
+- name: >
+        Configure host with SST-BF, install OVS-DPDK from distribution
+        repositories, pin physical cores to DPDK's PMD, write remaining high +
+        normal priority CPUs and trait information to Nova
+  hosts: nova_compute
+  gather_facts: yes
+  user: root
+  tasks:
+    - name: >
+            Configure Nova compute with SST-BF, install and pin priority cores
+            to DPDK's PMD
+      vars:
+        skip_ovs_dpdk_config: false
+        ovs_dpdk_installed: false
+      include_role:
+        name: "sst_bf_openstack_setup_automation"
+
+# [ Insert role to install Openstack Nova Compute here ]
+# Openstack Nova compute must be installed before running the next task
+
+    - name: Write remaining priority + normal CPUs & SST-BF trait info to Nova
+      vars:
+        OS_USERNAME: admin
+        OS_PASSWORD: admin
+        OS_AUTH_URL: https://192.168.1.1
+        OS_PROJECT_NAME: default
+        OS_USER_DOMAIN_ID: default
+        OS_PROJECT_DOMAIN_ID: demo
+        configure_os_only: true
+      include_role:
+        name: "sst_bf_openstack_setup_automation"

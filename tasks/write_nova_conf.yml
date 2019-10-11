@@ -1,0 +1,96 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+- name: Check if required variables are set
+  fail:
+    msg: "Variable '{{ item }}' is not defined. Set variable 'write_nova_only' \
+          to false first to get the required vars and rerun this"
+  with_items:
+    - "high_cores"
+    - "normal_cores"
+  when: "{{ item }} is not defined"
+
+- name: Register nova configuration file
+  stat:
+    path: "{{ nova_conf_path }}"
+  register: nc
+
+- name: Check if Nova configuration file is available
+  fail:
+    msg: "Nova configuration file not available"
+  when: not nc.stat.exists
+
+- name: Read nova conf file
+  command: "cat {{ nova_conf_path }}"
+  register: nova_conf
+
+- name: Ensure compute heading exists
+  become: yes
+  lineinfile:
+    path: "{{ nova_conf_path }}"
+    line: "\n[compute]"
+    insertbefore: EOF
+  when: nova_conf.stdout.find('[compute]') == -1
+
+- name: Remove existing cpu_shared_set definition
+  lineinfile:
+    path: "{{ nova_conf_path }}"
+    regexp: "^cpu_shared_set"
+    state: absent
+
+- name: Append SST-BF normal priority core information under compute heading minus OVS-DPDK cores
+  lineinfile:
+    path: "{{ nova_conf_path }}"
+    line: "cpu_shared_set = {{ normal_cores_l | join(',') }}"
+    insertafter: '^\[compute\]'
+    state: present
+  when: normal_cores_l is defined
+
+- name: Append SST-BF normal priority core information under compute heading
+  lineinfile:
+    path: "{{ nova_conf_path }}"
+    line: "cpu_shared_set = {{ normal_cores.stdout_lines[0] }}"
+    insertafter: '^\[compute\]'
+    state: present
+  when: normal_cores_l is undefined
+
+- name: Remove existing cpu_dedicated_set definition
+  lineinfile:
+    path: "{{ nova_conf_path }}"
+    regexp: "^cpu_dedicated_set"
+    state: absent
+
+- name: Append SST-BF high core information under compute heading minus OVS-DPDK cores
+  lineinfile:
+    path: "{{ nova_conf_path }}"
+    line: "cpu_dedicated_set = {{ high_cores_l | join(',') or high_cores.stdout_lines[0] }}"
+    insertafter: '^\[compute\]'
+    state: present
+  when: high_cores_l is defined
+
+- name: Append SST-BF high core information under compute heading
+  lineinfile:
+    path: "{{ nova_conf_path }}"
+    line: "cpu_dedicated_set = {{ high_cores.stdout_lines[0] }}"
+    insertafter: '^\[compute\]'
+    state: present
+  when: high_cores_l is undefined
+
+- name: Restart Nova for changes to take effect
+  systemd:
+    name: "{{ nova_service_name }}"
+    daemon_reload: yes
+    state: restarted
+  when: restart_nova

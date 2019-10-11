@@ -1,0 +1,128 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+---
+- name: Ensure python3 is installed for Ubuntu
+  raw: test -e /usr/bin/python3 || (apt -y update && apt install -fy python3)
+  when: ansible_distribution == 'Ubuntu'
+
+- name: Register base frequency file
+  stat:
+    path: /sys/devices/system/cpu/cpu0/cpufreq/base_frequency
+  register: bf
+
+- name: Check if SST-BF is available
+  fail:
+    msg: "SST-BF is not available. Ensure you have kernel ver. 5.1 or
+    greater and SST-BF support enabled in BIOS"
+  when: not bf.stat.exists
+
+- name: Load MSR kernel module
+  modprobe:
+    name: msr
+    state: present
+
+- name: Get current kernel release
+  command: uname -r
+  changed_when: false
+  register: kernel_release
+  when: ansible_distribution == 'Fedora' or
+        ansible_distribution == 'CentOS' or
+        ansible_distribution == 'RedHat'
+
+- name: Check for MSR kernel module
+  lineinfile:
+    name: "/boot/config-{{ kernel_release.stdout_lines[0] }}"
+    line: "CONFIG_X86_MSR=y"
+    state: present
+  check_mode: yes
+  when: ansible_distribution == 'Fedora' or
+        ansible_distribution == 'CentOS' or
+        ansible_distribution == 'RedHat'
+
+- name: Set folder name
+  set_fact:
+    sst_bf_folder_name: "CommsPowerManagement"
+
+- name: Attempt to set and gather SST-BF information
+  become: yes
+  block:
+    # Ignoring errors on this task to ensure any parallel processes do not fail
+    # when attempting to gain git lock at this folder location.
+    # To ensure the repository exists, further checks are performed later.
+    - name: Pull SST-BF code from git
+      ignore_errors: true
+      git:
+        repo: https://github.com/intel/CommsPowerManagement.git
+        dest: "/tmp/{{ sst_bf_folder_name }}"
+        clone: yes
+        force: yes
+        accept_hostkey: yes
+        version: master
+      delegate_to: localhost
+      when: not offline
+
+    - name: Register supporting script repository
+      stat:
+        path: "/tmp/{{ sst_bf_folder_name }}"
+      delegate_to: localhost
+      register: support_repo_stat
+
+    - name: Ensure supporting git repository is present
+      fail:
+        msg: "Repository {{ sst_bf_folder_name }} does not exist in Ansible controllers /tmp"
+      when: not support_repo_stat.stat.exists
+
+    - name: Check for possible symbolic link attack
+      fail:
+        msg: "Possible symbolic link attack detected."
+      when: support_repo_stat.stat.islnk
+
+    - name: Register supporting SST-BF python script
+      stat:
+        path: "/tmp/{{ sst_bf_folder_name }}"
+      delegate_to: localhost
+      register: py_support_stat
+
+    - name: Ensure supporting SST-BF python script exists
+      fail:
+        msg: "Supporting python script sst_bf.py doesnt exist"
+      when: not py_support_stat.stat.exists
+
+    - name: Check for python script symbolic link attack
+      fail:
+        msg: "Possible symbolic link attack on supporting python script sst_bf.py"
+      when: py_support_stat.stat.islnk
+
+    # See sst_bf.py -h for information about this config.
+    - name: Set SST-BF profile for FIXED
+      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -s"
+      when: sst_bf_profile == 'FREQUENCY_FIXED_HIGH_DEDICATED' or
+            sst_bf_profile == 'FREQUENCY_FIXED_HIGH_SHARED'
+
+    - name: Set SST-BF profile for VAR
+      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -a"
+      when: sst_bf_profile == 'FREQUENCY_VAR_HIGH_DEDICATED' or
+            sst_bf_profile == 'FREQUENCY_VAR_HIGH_SHARED'
+
+    - name: Get high priority cores
+      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -l"
+      changed_when: false
+      register: high_cores
+
+    - name: Get normal priority cores
+      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -n"
+      changed_when: false
+      register: normal_cores

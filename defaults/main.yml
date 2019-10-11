@@ -1,0 +1,114 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+# SST-BF profile to apply to target
+# Options for sst_bf_profile:
+# - FREQUENCY_FIXED_HIGH_DEDICATED
+# - FREQUENCY_FIXED_HIGH_SHARED
+# - FREQUENCY_VAR_HIGH_DEDICATED
+# - FREQUENCY_VAR_HIGH_SHARED
+sst_bf_profile: FREQUENCY_FIXED_HIGH_DEDICATED
+
+# Option to configure cpu_dedicated_set/cpu_shared_set in Nova
+# configuration file, adding SST-BF trait and flavors to Openstack.
+# No other task is performed when true.
+# Openstack will not be altered when false. This variable
+# must be false for any other task to be executed including setting system
+# up for SST-BF and/or configuring OVS-DPDK.
+configure_os_only: false
+
+# Openstack Nova target configuation file for SST-BF information
+# where priority and normal cores will be stored under the values
+# cpu_dedicated_set and cpu_shared_set respectively under heading compute.
+# provider_config directory for traits are also defined here.
+nova_conf_path: /etc/nova/nova-cpu.conf
+
+# This option specifies virtual CPU to physical CPU allocation ration for
+# shared cores. Type is float. Comment out if you wish to disable configuring
+# cpu_allocation_ratio.
+cpu_allocation_ratio: 1.0
+
+# Option to skip OVS-DPDK configuration if true
+# otherwise configure OVS-DPDK if false
+skip_ovs_dpdk_config: true
+
+# Configure an existing installation of OVS-DPDK if true or
+# to install OVS-DPDK from distributions repositories if false
+# Note: Installation from distribution repositories only available
+# with Ubuntu (16.04 & 18.04)
+ovs_dpdk_installed: true
+
+# Airgapped deployments
+offline: false
+
+# A restart of Nova is required to acquire changes from Nova conf
+restart_nova: true
+nova_service_name: devstack@n*
+
+## Key-value pairs below need configuration if you are installing
+## and configuring OVS-DPDK
+
+# Description for describing the target host & desired state.
+# Host description can be described for a group of targets
+# in group_vars
+host_description:
+# NUMA nodes definition
+  numa_nodes:
+#   NUMA Node X (integer)
+    0:
+#     Description of interfaces on NUMA X
+      interfaces:
+        eno1:
+          pci_address: "0000:3d:00.1"
+#       eno2:
+#          pci_address: "0000:3d:00.1"
+#     DPDK socket memory allocated to this NUMA node
+      dpdk_socket_mem: 1024
+#     Physical cores pinned to PMD on this NUMA node
+      no_physical_cores_pinned: 4
+    1:
+      dpdk_socket_mem: 1024
+      no_physical_cores_pinned: 0
+# Description of bridges to be created
+  bridge_mappings:
+#   Bridge name (key) and the interface name (value) it is bonded to.
+#   Interface must be declared in numa_nodes definition.
+    ovs-brnew: 'eno1'
+
+# Pin DPDK PMD to priority cores if true
+# otherwise pin to normal cores
+ovs_core_high_priority: true
+
+# Amount of 1 GB huge pages
+ovs_dpdk_nr_1g_pages: 16
+
+# Amount of 2 MB huge pages
+ovs_dpdk_nr_2m_pages: 2048
+
+# NIC driver. Options include:
+# vfio-pci, igb_uio, uio_pci_generic
+ovs_dpdk_driver: vfio-pci
+
+# OVS systemctl service name
+ovs_service_name: openvswitch-switch
+
+# DPDK systemctl service name
+dpdk_service_name: dpdk
+
+# Userspace datapath type for OVS bridge creation
+ovs_datapath: netdev
+
+# DPDK interface type
+ovs_dpdk_interface_type: dpdk

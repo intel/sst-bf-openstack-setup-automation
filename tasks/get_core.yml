@@ -1,0 +1,90 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+- name: Check if NUMA node exists
+  stat:
+    path: "/sys/devices/system/node/node{{ numa_no }}"
+  register: p
+
+- name: Fail if NUMA node does not exist
+  fail:
+    msg: "Numa node {{ numa_node_no }} does not exist"
+  when: not p.stat.exists
+
+- name: Gather CPUs on NUMA node
+  shell: |
+    set -o pipefail
+    ls /sys/devices/system/node/node{{ numa_no }} | grep -E 'cpu[0-9]+' | grep -Eo '[0-9]+'
+  args:
+    executable: /bin/bash
+  changed_when: false
+  register: numa_node_cpus
+
+- name: Check if there are more high priority cores available
+  fail:
+    msg: "There are no more priority cores available on NUMA node {{ numa_no }}"
+  when: high_cores_l | intersect(numa_node_cpus.stdout_lines) | length == 0
+        and ovs_core_high_priority
+
+- name: Check if there are more normal priority cores available
+  fail:
+    msg: "There are no more normal priority cores available on \
+          NUMA node {{ numa_no }}"
+  when: normal_cores_l | intersect(numa_node_cpus.stdout_lines) | length == 0
+        and not ovs_core_high_priority
+
+- name: Get priority CPU from NUMA node
+  set_fact:
+    core_number: "{{ high_cores_l | intersect(numa_node_cpus.stdout_lines) | first }}"
+  when: ovs_core_high_priority
+
+- name: Get normal CPU from NUMA node
+  set_fact:
+    core_number: "{{ normal_cores_l | intersect(numa_node_cpus.stdout_lines) | first }}"
+  when: not ovs_core_high_priority
+
+- name: Get a single core
+  command: "cat /sys/devices/system/cpu/cpu{{ core_number }}/topology/core_id"
+  register: core_id_l
+  when: not sibling_needed
+
+- name: Get a core siblings
+  command: "cat /sys/devices/system/cpu/cpu{{ core_number }}/topology/thread_siblings_list"
+  register: siblings_l
+  when: sibling_needed
+
+- name: Gather sibling core(s) information
+  set_fact:
+    core_l: "{{ siblings_l.stdout_lines[0].split(',') | list }}"
+  when: sibling_needed
+
+- name: Gather single core information
+  set_fact:
+    core_l: "{{ core_id_l.stdout_lines[0] | list }}"
+  when: not sibling_needed
+
+- name: Remove core(s) from high list
+  set_fact:
+    high_cores_l: "{{ high_cores_l | difference(core_l) }}"
+  when: ovs_core_high_priority
+
+- name: Remove core(s) from normal list
+  set_fact:
+    normal_cores_l: "{{ normal_cores_l | difference(core_l) }}"
+  when: not ovs_core_high_priority
+
+- name: Add OVS-DPDK core(s) to list
+  set_fact:
+    pinned_cores_l: "{{ pinned_cores_l + core_l }}"

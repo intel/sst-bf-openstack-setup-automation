@@ -1,0 +1,9 @@
+{% for numa_node in host_description['numa_nodes'] %}
+{% if 'interfaces' in host_description['numa_nodes'][numa_node].keys() %}
+{% for interface, value in host_description['numa_nodes'][numa_node]['interfaces'].items() %}
+{% if 'pci_address' in host_description['numa_nodes'][numa_node]['interfaces'][interface].keys() %}
+pci   {{ host_description['numa_nodes'][numa_node]['interfaces'][interface]['pci_address'] }}    {{ ovs_dpdk_driver }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endfor %}

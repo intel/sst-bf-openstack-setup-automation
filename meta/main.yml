@@ -1,0 +1,29 @@
+galaxy_info:
+  author: Sohaib Iqbal, Martin Kennelly, Mathana Sreedaran
+  description: Configure Openstack compute host with SST-BF. Optionally, pin OpenvSwitch-DPDK to
+               normal or high priority CPUs.
+               Configure Openstack for SST-BF.
+  company: Intel Corporation
+  license: "Apache v2.0"
+  min_ansible_version: 2.5.0
+
+  platforms:
+    - name: Ubuntu
+      versions:
+        - 18.04
+    - name: EL
+      versions:
+        - 8.0
+    - name: Fedora
+      versions:
+        - all
+
+  galaxy_tags:
+    - openstack
+    - nova
+    - orchestration
+    - openvswitch
+    - dpdk
+    - provisioning
+
+dependencies: []

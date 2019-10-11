@@ -1,0 +1,27 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+---
+- name: Configure host with SST-BF
+  include_tasks: set_get_sst_bf.yml
+  when: not configure_os_only
+
+- name: Configure OVS-DPDK
+  include_tasks: setup_ovs_dpdk.yml
+  when: not skip_ovs_dpdk_config and not configure_os_only
+
+- name: Configure Openstack
+  include_tasks: configure_os.yml
+  when: configure_os_only
