@@ -67,7 +67,7 @@
         clone: yes
         force: yes
         accept_hostkey: yes
-        version: master
+        version: 05509e90fc082538609198c05179a52971bb5897
       delegate_to: localhost
       when: not offline
 
