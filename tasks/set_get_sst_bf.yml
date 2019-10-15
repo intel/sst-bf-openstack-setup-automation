@@ -59,10 +59,8 @@
 - name: Attempt to set and gather SST-BF information
   become: yes
   block:
-    # Ignoring errors on this task to ensure any parallel processes do not fail
-    # when attempting to gain git lock at this folder location.
-    # To ensure the repository exists, further checks are performed later.
     - name: Pull SST-BF code from git
+      run_once: true
       ignore_errors: true
       git:
         repo: https://github.com/intel/CommsPowerManagement.git
