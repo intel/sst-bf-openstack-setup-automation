@@ -257,6 +257,9 @@ Setup Openstack\* Nova compute with SST-BF, install OVS-DPDK from distribution r
           name: "sst_bf_openstack_setup_automation"
 ```
 
+## Ansible Strategy
+This role supports linear Ansible* strategy only. This is the default Ansible* strategy. See [Ansible* strategy documentation](https://docs.ansible.com/ansible/latest/user_guide/playbooks_strategies.html) for more details
+
 ## Dependencies
 [Intel® CommsPowerManangement Python SST-BF configuration script](https://github.com/intel/CommsPowerManagement)
 
