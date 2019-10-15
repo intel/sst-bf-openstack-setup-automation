@@ -267,7 +267,7 @@ This role supports linear Ansible* strategy only. This is the default Ansible* s
 The role is provided under the Apache 2.0 license.
 
 ## Author Information
-* Sohaib Iqbal - sohaib.iqbal@intel.com
+* Sohaib Iqbal
 * Martin Kennelly - martin.kennelly@intel.com
 * Mathana Sreedaran - mathana.nair.sreedaran@intel.com
 
