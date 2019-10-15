@@ -28,7 +28,7 @@
       vars:
         skip_ovs_dpdk_config: false
       include_role:
-        name: "sst_bf_openstack_setup_automation"
+        name: "intel.sst_bf_openstack_setup_automation"
 
 # [ Insert role to install Openstack Nova Compute here ]
 # Openstack Nova compute must be installed before running the next task
@@ -43,4 +43,4 @@
         OS_PROJECT_DOMAIN_ID: demo
         configure_os_only: true
       include_role:
-        name: "st_bf_openstack_setup_automation
+        name: "intel.sst_bf_openstack_setup_automation"

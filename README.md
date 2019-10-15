@@ -65,7 +65,7 @@ Setup Openstack\* Nova compute with SST-BF and configure Openstack\* sample play
   tasks:
       - name: Set and get SST-BF
         include_role:
-          name: "sst_bf_openstack_setup_automation"
+          name: "intel.sst_bf_openstack_setup_automation"
 
 # [ Insert role to install Openstack Nova Compute here ]
 # Openstack Nova compute must be installed before running the next task
@@ -80,7 +80,7 @@ Setup Openstack\* Nova compute with SST-BF and configure Openstack\* sample play
           OS_PROJECT_DOMAIN_ID: demo
           configure_os_only: true
         include_role:
-          name: "sst_bf_openstack_setup_automation"
+          name: "intel.sst_bf_openstack_setup_automation"
 ```
 
 ## SST-BF Profile
@@ -209,7 +209,7 @@ Setup Openstack\* Nova compute with SST-BF, configure existing OVS-DPDK installa
         vars:
           skip_ovs_dpdk_config: false
         include_role:
-          name: "sst_bf_openstack_setup_automation"
+          name: "intel.sst_bf_openstack_setup_automation"
 
 # [ Insert role to install Openstack Nova Compute here ]
 # Openstack Nova compute must be installed before running the next task
@@ -224,7 +224,7 @@ Setup Openstack\* Nova compute with SST-BF, configure existing OVS-DPDK installa
           OS_PROJECT_DOMAIN_ID: demo
           configure_os_only: true
         include_role:
-          name: "sst_bf_openstack_setup_automation"
+          name: "intel.sst_bf_openstack_setup_automation"
 ```
 
 Setup Openstack\* Nova compute with SST-BF, install OVS-DPDK from distribution repository, pinning and isolating physical cores to DPDK's PMD and giving remaining cores to Openstack\*. Please define target `host_description` Ansible\* variable to suit your Openstack\* compute node.
@@ -239,7 +239,7 @@ Setup Openstack\* Nova compute with SST-BF, install OVS-DPDK from distribution r
           skip_ovs_dpdk_config: false
           ovs_dpdk_installed: false
         include_role:
-          name: "sst_bf_openstack_setup_automation"
+          name: "intel.sst_bf_openstack_setup_automation"
 
 # [ Insert role to install Openstack Nova Compute here ]
 # Openstack Nova compute must be installed before running the next task
@@ -254,7 +254,7 @@ Setup Openstack\* Nova compute with SST-BF, install OVS-DPDK from distribution r
           OS_PROJECT_DOMAIN_ID: demo
           configure_os_only: true
         include_role:
-          name: "sst_bf_openstack_setup_automation"
+          name: "intel.sst_bf_openstack_setup_automation"
 ```
 
 ## Ansible Strategy
