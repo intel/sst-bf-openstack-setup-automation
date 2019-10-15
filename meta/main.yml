@@ -10,10 +10,10 @@ galaxy_info:
   platforms:
     - name: Ubuntu
       versions:
-        - 18.04
+        - bionic
     - name: EL
       versions:
-        - 8.0
+        - 8
     - name: Fedora
       versions:
         - all
