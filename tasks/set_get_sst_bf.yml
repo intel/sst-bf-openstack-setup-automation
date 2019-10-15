@@ -61,7 +61,6 @@
   block:
     - name: Pull SST-BF code from git
       run_once: true
-      ignore_errors: true
       git:
         repo: https://github.com/intel/CommsPowerManagement.git
         dest: "/tmp/{{ sst_bf_folder_name }}"
