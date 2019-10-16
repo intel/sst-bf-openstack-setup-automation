@@ -1,5 +1,5 @@
 # Intel® Speed Select - Base Frequency for Openstack - Setup Automation
-The code herein allows a data center administrator or high-level orchestration tool to use Ansible\* for provisioning Openstack\* Nova compute servers with Intel® Speed Select - Base Frequency feature. Please read [Intel® Speed Select Technology – Base Frequency Configuration Automation on OpenStack* Compute Host](https://builders-staging.onsumaye.com/docs/networkbuilders/intel-speed-select-technology-base-frequency-configuration-automation-on-openstack-compute-host.pdf) Application note for more detailed information.
+The code herein allows a data center administrator or high-level orchestration tool to use Ansible\* for provisioning Openstack\* Nova compute servers with Intel® Speed Select - Base Frequency feature. Please read [Intel® Speed Select Technology – Base Frequency Configuration Automation on OpenStack* Compute Host](https://builders.intel.com/docs/networkbuilders/intel-speed-select-technology-base-frequency-configuration-automation-on-openstack-compute-host.pdf) Application note for more detailed information.
 
 Intel® SST-BF is a CPU feature designed to unlock software bottlenecks. For the same Thermal Design Power (TDP), a subset of cores have different frequency profiles depending on the profile selected with this Ansible\* role. A subset of cores run at higher core frequencies and this configuration presents an opportunity to address many use cases, including:
 * Network Function Virtualization (NFV) Data Plane, Control Plane and Open vSwitch\* (OVS) use cases
@@ -272,7 +272,7 @@ The role is provided under the Apache 2.0 license.
 * Mathana Sreedaran - mathana.nair.sreedaran@intel.com
 
 ## Further information
-1. [Intel® Speed Select Technology – Base Frequency Configuration Automation on OpenStack* Compute Host](https://builders-staging.onsumaye.com/docs/networkbuilders/intel-speed-select-technology-base-frequency-configuration-automation-on-openstack-compute-host.pdf)
+1. [Intel® Speed Select Technology – Base Frequency Configuration Automation on OpenStack* Compute Host](https://builders.intel.com/docs/networkbuilders/intel-speed-select-technology-base-frequency-configuration-automation-on-openstack-compute-host.pdf)
 2. [Intel® Speed Select - Base frequency](https://builders.intel.com/docs/networkbuilders/intel-speed-select-technology-base-frequency-enhancing-performance.pdf)
 3. [Intel® SST-BF configuration Python script](https://github.com/intel/CommsPowerManagement)
 
