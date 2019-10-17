@@ -106,6 +106,10 @@
     normal_cores_l: "{{ normal_cores.stdout_lines[0].split(',') }}"
     pinned_cores_l: []
 
+- name: Install python3-apt
+  command: apt install -y python3-apt
+  when: ansible_distribution == 'Ubuntu'
+
 #Note: igb_uio kernel module needs special compilation from source
 #      which is achieved with the package below on Ubuntu 18.04
 - name: Setup igb_uio kernel module on Ubuntu 18.04
