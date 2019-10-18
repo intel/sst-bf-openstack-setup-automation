@@ -13,6 +13,18 @@
 # limitations under the License.
 
 ---
+- name: Check if high priority required variable is set
+  fail:
+    msg: "Variable 'high_cores' is not defined. Set variable 'write_nova_only' \
+          to false first to get the required vars and rerun this"
+  when: high_cores is not defined
+
+- name: Check if normal priority required variable is set
+  fail:
+    msg: "Variable 'normal_cores' is not defined. Set variable 'write_nova_only' \
+          to false first to get the required vars and rerun this"
+  when: normal_cores is not defined
+
 - name: Get high and normal cores information
   set_fact:
      high_cores: "{{ high_cores_l | join(',') }}"
