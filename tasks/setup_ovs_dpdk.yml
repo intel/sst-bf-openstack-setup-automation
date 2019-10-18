@@ -225,6 +225,7 @@
     line: "{{ ovs_dpdk_driver }}"
     regexp: "^{{ ovs_dpdk_driver }}"
     state: present
+    create: yes
   when: ansible_distribution == 'Fedora' or
         ansible_distribution == 'CentOS' or
         ansible_distribution == 'RedHat'
