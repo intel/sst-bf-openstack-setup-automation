@@ -244,13 +244,14 @@
     regexp: "^GRUB_CMDLINE_LINUX="
     state: absent
   check_mode: yes
+  changed_when: false
   register: grub
 
 - name: Insert GRUB_CMDLINE_LINUX
   lineinfile:
     dest: /etc/default/grub
     line: GRUB_CMDLINE_LINUX=""
-  when: not grub.changed
+  when: not grub.found
 
 - name: Remove GRUB CMD line key-values we are replacing
   replace:
