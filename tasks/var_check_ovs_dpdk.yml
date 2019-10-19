@@ -1,0 +1,151 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+- name: host_description check - Verify host_description are defined
+  fail:
+    msg: Dict host_description is not defined
+  when: host_description is undefined
+
+- name: host_description check - Verify numa_nodes
+  fail:
+    msg: Dict numa_nodes is not defined in host_description
+  when: host_description.numa_nodes is not defined
+
+- name: host_description check - Verify one or more NUMA nodes are defined
+  fail:
+    msg: Define one or more NUMA nodes
+  when: not host_description['numa_nodes'] or
+        host_description['numa_nodes'] | length == 0
+
+- name: host_description check - Verify NUMA nodes are integers
+  fail:
+    msg: NUMA nodes must be integers
+  when: item | type_debug != 'int'
+  loop: "{{ host_description['numa_nodes'].keys() | list }}"
+
+- name: host_description check - Verify bridge mapping available
+  fail:
+    msg: No bridge mapping is defined
+  when: host_description.bridge_mappings is not defined
+
+- name: host_description check - Verify at least one bridge is defined
+  fail:
+    msg: No bridge is defined
+  when: host_description['bridge_mappings'] | length == 0
+
+- name: host_description check - Verify all bridges have one interface
+  fail:
+    msg: A bridge does not have a single interface
+  with_dict: "{{ host_description['bridge_mappings'] }}"
+  when: item.value | type_debug != 'str'
+
+- name: host_description - Gather information about interfaces PCI addresses
+  set_fact:
+    pci_addresses: "{{ pci_addresses | default([]) +
+                    host_description['numa_nodes'][item]['interfaces'].values() | list  }}"
+  loop: "{{ host_description['numa_nodes'].keys() | list | flatten(levels=1) }}"
+  when: host_description['numa_nodes'][item].interfaces is defined
+
+- name: host_description check - Verify each interface has a PCI address
+  fail:
+    msg: An interface has no associated PCI address
+  loop: "{{ pci_addresses }}"
+  when: "'pci_address' not in item"
+
+- name: host_description check - Verify dpdk_socket_mem is defined for each NUMA node
+  fail:
+    msg: "NUMA node {{ item.key }} does not have dpdk_socket_mem defined"
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  when: item.value.dpdk_socket_mem is not defined
+
+- name: host_description check - Ensure bridge mappings have associated interface
+        definition - register defined bridge interfaces
+  set_fact:
+    bridge_ints: "{{ bridge_ints | default([]) + [item] }}"
+  loop: "{{ host_description['bridge_mappings'].values() |
+         list | flatten(levels=1) }}"
+
+- name: host_description check - Ensure bridge mappings have associated interface
+        definition - register defined interfaces
+  set_fact:
+    defined_ints: "{{ (defined_ints | default([])) |
+                   union(item.value.interfaces.keys() | list) }}"
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  when: item.value.interfaces is defined
+
+- name: host_description check - Ensure bridge mappings have associated interface
+        definition - Perform check
+  fail:
+    msg: "Bridge interface {{ item }} does not have an interface
+          definition on any NUMA nodes"
+  loop: "{{ bridge_ints | list | flatten(levels=1) }}"
+  when: item not in defined_ints
+
+- name: Check ovs_core_high_priority
+  fail:
+    msg: Ensure ovs_core_high_priority is a boolean and defined
+  when: ovs_core_high_priority is not defined or
+        ovs_core_high_priority | type_debug != 'bool'
+
+- name: Check ovs_dpdk_nr_1g_pages
+  fail:
+    msg: Ensure ovs_dpdk_nr_1g_pages is an integer and defined
+  when: ovs_dpdk_nr_1g_pages is not defined or
+        ovs_dpdk_nr_1g_pages | type_debug != 'int'
+
+- name: Check ovs_dpdk_nr_2m_pages
+  fail:
+    msg: Ensure ovs_dpdk_nr_2m_pages is an integer and defined
+  when: ovs_dpdk_nr_2m_pages is not defined or
+        ovs_dpdk_nr_2m_pages | type_debug != 'int'
+
+- name: Check ovs_dpdk_driver
+  fail:
+    msg: "Ensure ovs_dpdk_driver is defined and either 'vfio-pci' or
+          'igb_uio' or 'uio_pci_generic'"
+  when: ovs_dpdk_driver is not defined or not
+        ( ovs_dpdk_driver == 'uio_pci_generic' or
+          ovs_dpdk_driver == 'igb_uio' or
+          ovs_dpdk_driver == 'vfio-pci' )
+
+- name: Check dpdk_service_name
+  fail:
+    msg: Ensure dpdk_service_name is defined and a string
+  when: dpdk_service_name is not defined or
+        dpdk_service_name | type_debug != 'AnsibleUnicode'
+
+- name: Check ovs_service_name
+  fail:
+    msg: Ensure ovs_service_name is defined and a string
+  when: ovs_service_name is not defined or
+        ovs_service_name | type_debug != 'AnsibleUnicode'
+
+- name: Check ovs_datapath
+  fail:
+    msg: Ensure ovs_datapath is defined and a string
+  when: ovs_datapath is not defined or
+        ovs_datapath | type_debug != 'AnsibleUnicode'
+
+- name: Check ovs_dpdk_interface_type
+  fail:
+    msg: Ensure ovs_dpdk_interface_type is defined and a string
+  when: ovs_dpdk_interface_type is not defined or
+        ovs_dpdk_interface_type | type_debug != 'AnsibleUnicode'
+
+- name: Verify ovs_dpdk_installed
+  fail:
+    msg: ovs_dpdk_installed is not defined or is not a boolean
+  when: ovs_dpdk_installed is not defined or not
+        ovs_dpdk_installed | type_debug == 'bool'

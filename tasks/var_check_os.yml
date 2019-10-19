@@ -1,0 +1,38 @@
+# Copyright (c) 2019 Intel Corporation. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+---
+- name: Verify nova_conf_path
+  fail:
+    msg: nova_conf_path is not defined
+  when: nova_conf_path is not defined
+
+- name: Verify cpu_allocation_ratio
+  fail:
+    msg: cpu_allocation_ratio is not defined or not a float or not an integer
+  when: cpu_allocation_ratio is not defined or not
+        (cpu_allocation_ratio | type_debug == 'int' or
+        cpu_allocation_ratio | type_debug == 'float')
+
+- name: Verify restart_nova
+  fail:
+    msg: restart_nova is not defined or is not a boolean
+  when: restart_nova is not defined or not
+        restart_nova | type_debug == 'bool'
+
+- name: Verify nova_service_name
+  fail:
+    msg: nova_service_name is not defined
+  when: restart_nova and nova_service_name is not defined

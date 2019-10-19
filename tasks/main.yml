@@ -14,6 +14,9 @@
 
 
 ---
+- name: Check Required Ansible Variables
+  include_tasks: var_check.yml
+
 - name: Configure host with SST-BF
   include_tasks: set_get_sst_bf.yml
   when: not configure_os_only
