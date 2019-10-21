@@ -50,18 +50,6 @@
         ansible_distribution_version == '18.04' and
         ovs_dpdk_driver == 'igb_uio'
 
-# Note: To use igb_uio kernel module on Ubuntu 16.04, you need to build DPDK
-#       from source on Ubuntu 16.04. This task is a check to ensure its is completed.
-- name: Setup igb_uio kernel module on Ubuntu 16.04
-  block:
-    - name: Ensure we have igb_uio module
-      modprobe:
-        name: igb_uio
-        state: present
-  when: ansible_distribution == 'Ubuntu' and
-        ansible_distribution_version == '16.04' and
-        ovs_dpdk_driver == 'igb_uio'
-
 - name: Get total amount of CPUs to pin
   set_fact:
     total_cpus_pin: "{{ (total_cpus_pin | default(0) | int) + \
