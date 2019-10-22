@@ -16,8 +16,9 @@
 ---
 - name: Verify nova_conf_path
   fail:
-    msg: nova_conf_path is not defined
-  when: nova_conf_path is not defined
+    msg: Ensure nova_conf_path is defined and a string
+  when: nova_conf_path is not defined or not
+        nova_conf_path | type_debug == 'AnsibleUnicode'
 
 - name: Verify cpu_allocation_ratio
   fail:
@@ -34,5 +35,6 @@
 
 - name: Verify nova_service_name
   fail:
-    msg: nova_service_name is not defined
-  when: restart_nova and nova_service_name is not defined
+    msg: Ensure nova_service_name is defined and a string
+  when: nova_service_name is not defined or not
+        nova_service_name | type_debug == 'AnsibleUnicode'
