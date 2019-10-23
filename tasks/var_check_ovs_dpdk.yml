@@ -16,7 +16,7 @@
 - name: host_description check - Verify host_description are defined
   fail:
     msg: Dict host_description is not defined
-  when: host_description is undefined
+  when: host_description is not defined
 
 - name: host_description check - Verify numa_nodes
   fail:
@@ -43,32 +43,47 @@
 - name: host_description check - Verify at least one bridge is defined
   fail:
     msg: No bridge is defined
-  when: host_description['bridge_mappings'] | length == 0
+  when: not host_description['bridge_mappings'] or
+        host_description['bridge_mappings'] | length == 0
 
 - name: host_description check - Verify all bridges have one interface
   fail:
-    msg: A bridge does not have a single interface
+    msg: A bridge does not have a single interface or is not defined
   with_dict: "{{ host_description['bridge_mappings'] }}"
-  when: item.value | type_debug != 'str'
+  when: item.value is not string
 
 - name: host_description - Gather information about interfaces PCI addresses
   set_fact:
     pci_addresses: "{{ pci_addresses | default([]) +
-                    host_description['numa_nodes'][item]['interfaces'].values() | list  }}"
+                    host_description['numa_nodes'][item]['interfaces'].values() | list }}"
   loop: "{{ host_description['numa_nodes'].keys() | list | flatten(levels=1) }}"
   when: host_description['numa_nodes'][item].interfaces is defined
 
-- name: host_description check - Verify each interface has a PCI address
+- name: host_description check - Verify each interface has a PCI address key
   fail:
-    msg: An interface has no associated PCI address
+    msg: An interface has no pci_address key
   loop: "{{ pci_addresses }}"
-  when: "'pci_address' not in item"
+  when: None in pci_addresses
+
+- name: host_description check - Verify each interface has a PCI address value
+  fail:
+    msg: An interface has no associated PCI address value
+  loop: "{{ pci_addresses }}"
+  when: None in item.values()
 
 - name: host_description check - Verify dpdk_socket_mem is defined for each NUMA node
   fail:
     msg: "NUMA node {{ item.key }} does not have dpdk_socket_mem defined"
   with_dict: "{{ host_description['numa_nodes'] }}"
-  when: item.value.dpdk_socket_mem is not defined
+  when: item.value.dpdk_socket_mem is not defined or not
+        item.value.dpdk_socket_mem | type_debug == 'int'
+
+- name: host_description check - Verify no_physical_cores_pinned is defined for each NUMA node
+  fail:
+    msg: "NUMA node {{ item.key }} does not have no_physical_cores_pinned defined"
+  with_dict: "{{ host_description['numa_nodes'] }}"
+  when: item.value.no_physical_cores_pinned is not defined or not
+        item.value.no_physical_cores_pinned | type_debug == 'int'
 
 - name: host_description check - Ensure bridge mappings have associated interface
         definition - register defined bridge interfaces
@@ -96,20 +111,20 @@
 - name: Check ovs_core_high_priority
   fail:
     msg: Ensure ovs_core_high_priority is a boolean and defined
-  when: ovs_core_high_priority is not defined or
-        ovs_core_high_priority | type_debug != 'bool'
+  when: ovs_core_high_priority is not defined or not
+        ovs_core_high_priority | type_debug == 'bool'
 
 - name: Check ovs_dpdk_nr_1g_pages
   fail:
     msg: Ensure ovs_dpdk_nr_1g_pages is an integer and defined
-  when: ovs_dpdk_nr_1g_pages is not defined or
-        ovs_dpdk_nr_1g_pages | type_debug != 'int'
+  when: ovs_dpdk_nr_1g_pages is not defined or not
+        ovs_dpdk_nr_1g_pages | type_debug == 'int'
 
 - name: Check ovs_dpdk_nr_2m_pages
   fail:
     msg: Ensure ovs_dpdk_nr_2m_pages is an integer and defined
-  when: ovs_dpdk_nr_2m_pages is not defined or
-        ovs_dpdk_nr_2m_pages | type_debug != 'int'
+  when: ovs_dpdk_nr_2m_pages is not defined or not
+        ovs_dpdk_nr_2m_pages | type_debug == 'int'
 
 - name: Check ovs_dpdk_driver
   fail:
@@ -124,25 +139,25 @@
   fail:
     msg: Ensure dpdk_service_name is defined and a string
   when: dpdk_service_name is not defined or
-        dpdk_service_name | type_debug != 'AnsibleUnicode'
+        dpdk_service_name is not string
 
 - name: Check ovs_service_name
   fail:
     msg: Ensure ovs_service_name is defined and a string
   when: ovs_service_name is not defined or
-        ovs_service_name | type_debug != 'AnsibleUnicode'
+        ovs_service_name is not string
 
 - name: Check ovs_datapath
   fail:
     msg: Ensure ovs_datapath is defined and a string
   when: ovs_datapath is not defined or
-        ovs_datapath | type_debug != 'AnsibleUnicode'
+        ovs_datapath is not string
 
 - name: Check ovs_dpdk_interface_type
   fail:
     msg: Ensure ovs_dpdk_interface_type is defined and a string
   when: ovs_dpdk_interface_type is not defined or
-        ovs_dpdk_interface_type | type_debug != 'AnsibleUnicode'
+        ovs_dpdk_interface_type is not string
 
 - name: Verify ovs_dpdk_installed
   fail:
