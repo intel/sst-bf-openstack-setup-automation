@@ -308,8 +308,8 @@
     - [ "{{ flavor_names[7] }}", "4096", "2", "40"]
     - [ "{{ flavor_names[8] }}", "8192", "4", "80"]
     - [ "{{ flavor_names[9] }}", "8192", "4", "80"]
-    - [ "{{ flavor_names[10] }}", "16384","8","160"]
-    - [ "{{ flavor_names[11] }}", "16384","8","160"]
+    - [ "{{ flavor_names[10] }}", "16384", "8", "160"]
+    - [ "{{ flavor_names[11] }}", "16384", "8", "160"]
 
 - name: Gather SST_BF flavors properties attribute
   run_once: true
