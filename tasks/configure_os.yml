@@ -140,6 +140,12 @@
     state: restarted
   when: restart_nova
 
+- name: Install OS client and plugin for Placement
+  run_once: true
+  delegate_to: localhost
+  pip:
+    name: python-openstackclient,osc-placement
+
 - name: Get essential variables to log into keystone
   set_fact:
     OS_USERNAME: "{{ lookup('env', 'OS_USERNAME')|d(OS_USERNAME, true) }}"
@@ -161,38 +167,45 @@
 
 - name: Get list of OS traits
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait list -f value -c name"
   changed_when: false
   register: traits
 
 - name: Add CUSTOM_CPU_X86_INTEL_SST_BF trait to OS traits
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_X86_INTEL_SST_BF"
   when: '"CUSTOM_CPU_X86_INTEL_SST_BF" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED trait to OS traits
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED"
   when: '"CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED trait to OS traits
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED"
   when: '"CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED trait to OS traits
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED"
   when: '"CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED trait to OS traits
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED"
   when: '"CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED" not in traits.stdout_lines'
 
 - name: Get OS resource provider UUID
-  command: "{{ OPENSTACK_CLI }} resource provider list \
-           --name {{ ansible_hostname }} -f value -c uuid"
+  delegate_to: localhost
+  shell: "{{ OPENSTACK_CLI }} resource provider list \
+          -f value | grep {{ ansible_hostname }} | awk '{ print $1 }'"
   changed_when: false
   register: provider_uuid
 
@@ -202,6 +215,7 @@
   when: provider_uuid.stderr | length > 0
 
 - name: Get resource provider traits
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait list \
             {{ provider_uuid.stdout_lines[0] }} -c name -f value"
   changed_when: false
@@ -213,6 +227,7 @@
   loop: "{{ provider_traits.stdout_lines|flatten(levels=1) }}"
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED trait to resource provider
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
@@ -220,6 +235,7 @@
          sst_bf_profile == "FREQUENCY_FIXED_HIGH_DEDICATED"'
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED trait to resource provider
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
@@ -227,6 +243,7 @@
          sst_bf_profile == "FREQUENCY_FIXED_HIGH_SHARED"'
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED trait to resource provider
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
@@ -234,6 +251,7 @@
          sst_bf_profile == "FREQUENCY_VAR_HIGH_DEDICATED"'
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED trait to resource provider
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
@@ -286,12 +304,14 @@
 
 - name: Get list of OS flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor list -c Name -f value"
   changed_when: false
   register: flavors
 
 - name: Create SST-BF flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor create --ram {{ item[1] }} --vcpus {{ item[2] }}
             --disk {{ item[3] }} {{ item[0] }}"
   when: item[0] not in flavors.stdout_lines
@@ -313,6 +333,7 @@
 
 - name: Gather SST_BF flavors properties attribute
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor show {{ item }} -c properties -f value"
   changed_when: false
   register: flavor_prop
@@ -334,6 +355,7 @@
 
 - name: Add SST-BF capable trait requirement to flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set
             --property trait:CUSTOM_CPU_X86_INTEL_SST_BF=required {{ item }}"
   when: flavor_prop_set | length > 0
@@ -341,6 +363,7 @@
 
 - name: Add dedicated CPU policy to flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set --property hw:cpu_policy=dedicated {{ item }}"
   when: flavor_prop_set | length > 0
   loop:
@@ -353,6 +376,7 @@
 
 - name: Add shared CPU policy to flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set --property hw:cpu_policy=shared
            {{ item }}"
   when: flavor_prop_set | length > 0
@@ -366,6 +390,7 @@
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED trait requirement to flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set \
             --property trait:CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED=required {{ item }}"
   when: 'sst_bf_profile == "FREQUENCY_FIXED_HIGH_DEDICATED" and flavor_prop_set | length > 0'
@@ -373,6 +398,7 @@
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED trait requirement to flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set
             --property trait:CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED=required {{ item }}"
   when: 'sst_bf_profile == "FREQUENCY_FIXED_HIGH_SHARED" and flavor_prop_set | length > 0'
@@ -380,6 +406,7 @@
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED trait requirement to flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set \
             --property trait:CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED=required {{ item }}"
   when: 'sst_bf_profile == "FREQUENCY_VAR_HIGH_DEDICATED" and flavor_prop_set | length > 0'
@@ -387,6 +414,7 @@
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED trait requirement to flavors
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set
             --property trait:CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED=required {{ item }}"
   when: 'sst_bf_profile == "FREQUENCY_VAR_HIGH_SHARED" and flavor_prop_set | length > 0'
@@ -395,6 +423,7 @@
 # Bug in OSCLI referencing flavors by name. Need to get flavor ID to compensate.
 - name: Get flavor IDs
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor show {{ item }} -c id -f value"
   changed_when: false
   register: flavor_ids
@@ -402,6 +431,7 @@
 
 - name: Get flavor descriptions
   run_once: true
+  delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor show
             {{ item }} -c description -f value"
   changed_when: false
@@ -415,6 +445,7 @@
 
 - name: Set flavor description for FREQUENCY_FIXED_HIGH_DEDICATED profile
   run_once: true
+  delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set
             {{ item.stdout_lines[0] }} --description "*.freq-fixed.high-tier-dedicated:
             High fixed frequency cores are set to dedicated sets (PCPU)
@@ -425,6 +456,7 @@
 
 - name: Set flavor description for FREQUENCY_FIXED_HIGH_SHARED profile
   run_once: true
+  delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set
             {{ item.stdout_lines[0] }} --description "*.freq-fixed.high-tier-dedicated:
             Normal fixed frequency cores are set to dedicated sets (PCPU) --
@@ -435,6 +467,7 @@
 
 - name: Set flavor description for FREQUENCY_VAR_HIGH_DEDICATED profile
   run_once: true
+  delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set
             {{ item.stdout_lines[0] }} --description "*.freq-var.high-tier-dedicated:
             High variable frequency cores are set to dedicated sets (PCPU) --
@@ -445,6 +478,7 @@
 
 - name: Set flavor description for FREQUENCY_VAR_HIGH_SHARED profile
   run_once: true
+  delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set
             {{ item.stdout_lines[0] }} --description "*.freq-var.high-tier-shared:
             Normal variable frequency cores are set to dedicated sets (PCPU) --
