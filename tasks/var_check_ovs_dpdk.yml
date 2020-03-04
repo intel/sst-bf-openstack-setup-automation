@@ -35,22 +35,34 @@
   when: item | type_debug != 'int'
   loop: "{{ host_description['numa_nodes'].keys() | list }}"
 
+- name: host_description check - Gather information about defined NUMA nodes
+  set_fact:
+    numa_first: "{{ host_description['numa_nodes'].keys() | list | min }}"
+    numa_last: "{{ host_description['numa_nodes'].keys() | list | max }}"
+    numa_count: "{{ host_description['numa_nodes'].keys() | length }}"
+
+- name: host_description check - Verify continuous NUMA nodes
+  fail:
+    msg: Ensure NUMA nodes are in continuous ascending order starting from 0
+  when: (numa_last | int - numa_first | int) != (numa_count | int - 1) or
+        numa_first != "0"
+
 - name: host_description check - Verify bridge mapping available
   fail:
     msg: No bridge mapping is defined
   when: host_description.bridge_mappings is not defined
 
-- name: host_description check - Verify at least one bridge is defined
+- name: host_description check - Verify one bridge is defined
   fail:
-    msg: No bridge is defined
+    msg: One bridge needs to be defined
   when: not host_description['bridge_mappings'] or
-        host_description['bridge_mappings'] | length == 0
+        host_description['bridge_mappings'] | length != 1
 
-- name: host_description check - Verify all bridges have one interface
+- name: host_description check - Verify bridge has list of one or more interfaces
   fail:
-    msg: A bridge does not have a single interface or is not defined
+    msg: The bridge definition does not contain a list of one or more interfaces
   with_dict: "{{ host_description['bridge_mappings'] }}"
-  when: item.value is not string
+  when: item.value | type_debug != 'list' and item.value | length > 0
 
 - name: host_description - Gather information about interfaces PCI addresses
   set_fact:
@@ -135,12 +147,6 @@
           ovs_dpdk_driver == 'igb_uio' or
           ovs_dpdk_driver == 'vfio-pci' )
 
-- name: Check dpdk_service_name
-  fail:
-    msg: Ensure dpdk_service_name is defined and a string
-  when: dpdk_service_name is not defined or
-        dpdk_service_name is not string
-
 - name: Check ovs_service_name
   fail:
     msg: Ensure ovs_service_name is defined and a string
@@ -164,3 +170,16 @@
     msg: ovs_dpdk_installed is not defined or is not a boolean
   when: ovs_dpdk_installed is not defined or not
         ovs_dpdk_installed | type_debug == 'bool'
+
+- name: Verify no_ovs_dpdk_lcore_pinned
+  fail:
+    msg: "no_ovs_dpdk_lcore_pinned is not defined or is not a
+          positive non-zero integer"
+  when: no_ovs_dpdk_lcore_pinned is not defined or not
+        no_ovs_dpdk_lcore_pinned | type_debug == 'int' or
+        no_ovs_dpdk_lcore_pinned < 1
+
+- name: Verify offline and ovs_dpdk_installed vars don't conflict
+  fail:
+    msg: "offline mode can not be enabled when var ovs_dpdk_installed is false"
+  when: offline and not ovs_dpdk_installed

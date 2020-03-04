@@ -31,10 +31,10 @@
 
 - name: Install python3-apt
   command: apt install -y python3-apt
-  when: ansible_distribution == 'Ubuntu'
+  when: ansible_distribution == 'Ubuntu' and not offline
 
-#Note: igb_uio kernel module needs special compilation from source
-#      which is achieved with the package below on Ubuntu 18.04
+# Note: igb_uio kernel module needs special compilation from source
+#       which is achieved with the package below on Ubuntu 18.04
 - name: Setup igb_uio kernel module on Ubuntu 18.04
   block:
     - name: Ensure we have dpdk-igb-uio-dkms installed
@@ -48,7 +48,8 @@
         state: present
   when: ansible_distribution == 'Ubuntu' and
         ansible_distribution_version == '18.04' and
-        ovs_dpdk_driver == 'igb_uio'
+        ovs_dpdk_driver == 'igb_uio' and
+        not offline
 
 - name: Get total amount of CPUs to pin
   set_fact:
@@ -110,44 +111,115 @@
   set_fact:
     pinned_cores_l: []
 
-- name: Get normal priority OVS-DPDK lcore
-  include: get_core.yml
+- name: Get a cores siblings to infer no. of threads per physical core
+  command: "cat /sys/devices/system/cpu/cpu0/topology/thread_siblings_list"
+  register: sample_siblings
+  changed_when: true
+
+- name: Set threads (logical cores) per physical core
+  set_fact:
+    threads_core: "{{ sample_siblings.stdout_lines[0].split(',') | length }}"
+
+- name: Get normal priority core for OVS-DPDK lcore and core siblings
+  include: get_cores.yml
   vars:
     numa_no: 0
+    no_cores_pinned: "{{ no_ovs_dpdk_lcore_pinned / (threads_core | int) | int }}"
+    sibling_needed: true
+    ovs_core_high_priority: false
+  when: no_ovs_dpdk_lcore_pinned >= (threads_core | int)
+
+- name: Get single normal priority core for OVS-DPDK lcore
+  include: get_cores.yml
+  vars:
+    numa_no: 0
+    no_cores_pinned: "{{ no_ovs_dpdk_lcore_pinned % (threads_core | int) }}"
     sibling_needed: false
     ovs_core_high_priority: false
+  when: no_ovs_dpdk_lcore_pinned % (threads_core | int) != 0
 
 - name: Generate hex for pinning OVS-DPDK lcore
   script: "{{ role_path }}/files/convert_cpu_hex.py {{ pinned_cores_l | join(',') }}"
   delegate_to: 127.0.0.1
   register: ovs_dpdk_lcore_mask
 
-- name: Add kernel module to /etc/modules
-  lineinfile:
-    path: /etc/modules
-    line: "{{ ovs_dpdk_driver }}"
-    regexp: "^{{ ovs_dpdk_driver }}"
-    state: present
+- name: Ensure required drivers/modules persist after a reboot
+  block:
+    - name: Register modules file
+      stat:
+        path: /etc/modules
+      register: mod
+
+    - name: Check if modules file exists
+      fail:
+        msg: "'/etc/modules' file does not exist"
+      when: not mod.stat.exists
+
+    - name: Check for symbolic link attack
+      fail:
+        msg: "Possible symbolic link attack for file '/etc/modules'"
+      when: mod.stat.islnk
+
+    - name: Add kernel module to modules file
+      lineinfile:
+        path: /etc/modules
+        line: "{{ ovs_dpdk_driver }}"
+        regexp: "^{{ ovs_dpdk_driver }}"
+        state: present
+
+    - name: Add OpenvSwitch module to file
+      lineinfile:
+        path: /etc/modules
+        line: 'openvswitch'
+        regexp: '^openvswitch'
+        state: present
   when: ansible_distribution == 'Ubuntu'
 
-- name: Add kernel module to /etc/modules-load.d
-  lineinfile:
-    path: /etc/modules-load.d/ovs-dpdk
-    line: "{{ ovs_dpdk_driver }}"
-    regexp: "^{{ ovs_dpdk_driver }}"
-    state: present
-    create: yes
-  when: ansible_distribution == 'Fedora' or
-        ansible_distribution == 'CentOS' or
-        ansible_distribution == 'RedHat'
+- name: Ensure required drivers/modules persist after a reboot
+  block:
+    - name: Register modules directory
+      stat:
+        path: /etc/modules-load.d
+      register: mod_l
 
-- name: Add openvswitch module to /etc/modules
-  lineinfile:
-    path: /etc/modules
-    line: 'openvswitch'
-    regexp: '^openvswitch'
-    state: present
-  when: ansible_distribution == 'Ubuntu'
+    - name: Check if modules folder exists
+      fail:
+        msg: "'/etc/modules-load.d' directory does not exist"
+      when: not mod_l.stat.exists
+
+    - name: Check for symbolic link attack
+      fail:
+        msg: "Possible symbolic link attack for directory '/etc/modules-load.d'"
+      when: mod_l.stat.islnk is defined and mod_l.stat.islnk
+
+    - name: Register OVS-DPDK module file
+      stat:
+        path: /etc/modules-load.d/ovs-dpdk
+      register: mod_ovs
+
+    - name: Check for symbolic link attack
+      fail:
+        msg: "Possible symbolic link attack for file '/etc/modules-load.d/ovs-dpdk'"
+      when: mod_ovs.stat.exists and mod_ovs.stat.islnk
+
+    - name: Add OpenvSwitch module to file
+      lineinfile:
+        path: /etc/modules-load.d/ovs-dpdk
+        line: "{{ ovs_dpdk_driver }}"
+        regexp: "^{{ ovs_dpdk_driver }}"
+        state: present
+        create: yes
+  when: ansible_distribution != 'Ubuntu'
+
+- name: Register grub file
+  stat:
+    path: /etc/default/grub
+  register: default_grub
+
+- name: Check for symbolic link attack
+  fail:
+    msg: "Possible symbolic link attack on file '/etc/default/grub'"
+  when: default_grub.stat.islnk is defined and default_grub.stat.islnk
 
 - name: Check if GRUB_CMDLINE_LINUX present from GRUB file
   lineinfile:
@@ -167,7 +239,7 @@
 - name: Remove GRUB CMD line key-values we are replacing
   replace:
     path: /etc/default/grub
-    regexp: "{{ item }}=[']?[a-zA-Z0-9,-]+[']?"
+    regexp: "\\s*{{ item }}=[']?[a-zA-Z0-9,-]+[']?"
     replace: ""
   loop:
     - "default_hugepagesz"
@@ -181,7 +253,7 @@
   replace:
     path: /etc/default/grub
     regexp: '(^GRUB_CMDLINE_LINUX=\"(.*)?)(\")'
-    replace: '\1default_hugepagesz=1G hugepagesz=1G
+    replace: '\1 default_hugepagesz=1G hugepagesz=1G
            hugepages={{ ovs_dpdk_nr_1g_pages }} hugepagesz=2M
            hugepages={{ ovs_dpdk_nr_2m_pages }}
            isolcpus={{ ovs_dpdk_pmd_core_l| join(",") }} iommu=pt intel_iommu=on\3'
@@ -196,9 +268,7 @@
 
 - name: Update grub
   shell: grub2-mkconfig -o "$(readlink -e /etc/grub2.conf)"
-  when: ansible_distribution == 'Fedora' or
-        ansible_distribution == 'CentOS' or
-        ansible_distribution == 'RedHat'
+  when: ansible_distribution != 'Ubuntu'
 
 - name: Reboot
   shell: "sleep 1 && shutdown -r now 'Ansible update to GRUB - forced restart'"
@@ -221,33 +291,71 @@
       - openvswitch-common
       - openvswitch-switch-dpdk
   when: ansible_distribution == 'Ubuntu' and
-        not ovs_dpdk_installed|default(true)|bool
+        not offline and
+        not ovs_dpdk_installed|bool
 
-- name: Set alternative ovs-vswitchd service
-  alternatives:
-    name: ovs-vswitchd
-    path: /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
-  when: not ovs_dpdk_installed|default(true)|bool
+- name: Configure OpenvSwitch-DPDK and restart service
+  block:
+    - name: Register OVS-DPDK file
+      stat:
+        path: /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
+      register: ovs_vswitch_dpdk
 
-- name: Configure DPDK interface for driver bindings
-  template:
-    src: dpdk_interfaces.j2
-    dest: "/etc/dpdk/interfaces"
-    owner: "root"
-    group: "root"
+    - name: Check if ovs-vswitchd-dpdk file exists
+      fail:
+        msg: "ovs-vswitchd-dpdk file does not exist"
+      when: not ovs_vswitch_dpdk.stat.exists
 
-- name: Configure DPDK hugepage allocation
-  template:
-    src: dpdk.conf.j2
-    dest: "/etc/dpdk/dpdk.conf"
-    owner: "root"
-    group: "root"
+    - name: Check if symbolic link
+      fail:
+        msg: "Possible symbolic link attack detected"
+      when: ovs_vswitch_dpdk.stat.islnk is defined and ovs_vswitch_dpdk.stat.islnk
 
-- name: Ensure DPDK service is running
-  systemd:
-    name: "{{ dpdk_service_name }}"
-    state: restarted
-    enabled: yes
+    - name: Set alternative ovs-vswitchd service
+      alternatives:
+        name: ovs-vswitchd
+        path: /usr/lib/openvswitch-switch-dpdk/ovs-vswitchd-dpdk
+
+    - name: Register DPDK folder
+      stat:
+        path: "/etc/dpdk"
+      register: dpdk_dir
+
+    - name: Check if DPDK directory is symbolically linked
+      fail:
+        msg: "Possible symbolic link attack detected"
+      when: dpdk_dir.stat.islnk is defined and dpdk_dir.stat.islnk
+
+    - name: Check if DPDK folder exists
+      fail:
+        msg: "'/etc/dpdk' folder does not exist"
+      when: not dpdk_dir.stat.exists
+
+    - name: Check if path is a directory
+      fail:
+        msg: "'/etc/dpdk' is not a directory"
+      when: dpdk_dir.stat.isdir is defined and not dpdk_dir.stat.isdir
+
+    - name: Configure DPDK interface for driver bindings
+      template:
+        src: dpdk_interfaces.j2
+        dest: "/etc/dpdk/interfaces"
+        owner: "root"
+        group: "root"
+
+    - name: Configure DPDK hugepage allocation
+      template:
+        src: dpdk.conf.j2
+        dest: "/etc/dpdk/dpdk.conf"
+        owner: "root"
+        group: "root"
+
+    - name: Ensure DPDK service is running
+      systemd:
+        name: dpdk
+        state: restarted
+        enabled: yes
+  when: not ovs_dpdk_installed | bool and not offline
 
 - name: Ensure Open vSwitch is running
   systemd:
@@ -269,13 +377,16 @@
             other_config:pmd-cpu-mask='{{ ovs_dpdk_pmd_mask.stdout_lines[0] }}'"
   changed_when: true
 
+- name: Get number of NUMA nodes defined
+  set_fact:
+    no_numa_def: "{{ host_description['numa_nodes'].keys() | length | int }}"
+
 - name: Generate total socket memory string for dpdk
   set_fact:
-    ovs_dpdk_socket_mem_mb: "{{ ovs_dpdk_socket_mem_mb|default('')|string + \
-                                ',' + numa_id.value.dpdk_socket_mem|string }}"
-  with_dict: "{{ host_description['numa_nodes'] }}"
-  loop_control:
-    loop_var: numa_id
+    ovs_dpdk_socket_mem_mb: "{{ ovs_dpdk_socket_mem_mb | default('') | string +
+                                ',' + host_description['numa_nodes'][item]
+                                ['dpdk_socket_mem'] | string }}"
+  loop: "{{ range(0, (no_numa_def | int )) | list }}"
 
 - name: Set DPDK socket memory
   command: "ovs-vsctl --no-wait set Open_vSwitch . \
@@ -285,6 +396,16 @@
 - name: Enable DPDK support for Open vSwitch
   command: "ovs-vsctl --no-wait set Open_vSwitch . other_config:dpdk-init=true"
   changed_when: true
+
+- name: Restart Open vSwitch to apply changes
+  systemd:
+    name: "{{ ovs_service_name }}"
+    state: restarted
+    enabled: yes
+
+- name: Pause for 5 seconds to ensure services have time to come back up
+  pause:
+    seconds: 5
 
 - name: Create vhost_socket directory
   file:
@@ -297,35 +418,35 @@
     - "/var/lib/vhost_socket"
   when: vhost_socket_directory_group is defined
 
+- name: Get bridge name
+  set_fact:
+    ovs_bridge_name: "{{ item.key }}"
+  loop: "{{ host_description['bridge_mappings'] | dict2items }}"
+
 - name: Setup network provider bridges
   openvswitch_bridge:
-    bridge: "{{ bridge.key }}"
-    set: "bridge {{ bridge.key }} datapath_type='{{ ovs_datapath }}'"
+    bridge: "{{ ovs_bridge_name }}"
+    set: "bridge {{ ovs_bridge_name }} datapath_type='{{ ovs_datapath }}'"
     fail_mode: secure
     state: present
-  with_dict: "{{ host_description['bridge_mappings'] }}"
-  loop_control:
-    loop_var: bridge
 
-- name: Get Interface's pci address
+- name: Get list of interface name(s) to be binded to the OVS bridge
   set_fact:
-    "{{ item[0] }}_pci_addr": "{{ item[1]['interfaces'][ item[0] ]['pci_address'] | trim }}"
-  with_nested:
-    - "{{ host_description['bridge_mappings'].values() | list }}"
-    - "{{ host_description['numa_nodes'].values() | list }}"
-  when: >
-    item[1].interfaces is defined and
-    item[0] in item[1]['interfaces'] and
-    item[1]['interfaces'][item[0]].pci_address is defined
+    bridge_int_names: "{{ host_description['bridge_mappings'][ovs_bridge_name] }}"
 
-# Note: Presently, we can only bind to a single interface
+- name: Get interface's pci address
+  set_fact:
+    "{{ item[0] }}_pci_addr": "{{ item[1]['interfaces'][item.0].pci_address }}"
+  loop: "{{ bridge_int_names | product(host_description['numa_nodes'].values()) | list }}"
+  when: item[1].interfaces is defined and item[0] in item[1]['interfaces']
+
 - name: Add ports to network provider bridges
   openvswitch_port:
-    bridge: "{{ bridge_map.key }}"
-    port: "{{ bridge_map.value }}"
-    set: "Interface {{ bridge_map.value }} type={{ ovs_dpdk_interface_type }} \
-          options:dpdk-devargs='{{ lookup('vars',bridge_map.value + '_pci_addr') }}'"
+    bridge: "{{ ovs_bridge_name }}"
+    port: "{{ int_name }}"
+    set: "Interface {{ int_name }} type={{ ovs_dpdk_interface_type }} \
+          options:dpdk-devargs='{{ lookup('vars',int_name + '_pci_addr') }}'"
     state: present
-  with_dict: "{{ host_description['bridge_mappings'] }}"
+  loop: "{{ host_description['bridge_mappings'].values() | list | flatten(levels=1) }}"
   loop_control:
-    loop_var: bridge_map
+    loop_var: int_name

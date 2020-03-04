@@ -27,8 +27,8 @@
 
 - name: Get high and normal cores information
   set_fact:
-     high_cores: "{{ high_cores_l | join(',') }}"
-     normal_cores: "{{ normal_cores_l | join(',') }}"
+    high_cores: "{{ high_cores_l | join(',') }}"
+    normal_cores: "{{ normal_cores_l | join(',') }}"
   when: high_cores_l is defined and normal_cores_l is defined
 
 - name: Get high and normal cores information
@@ -47,6 +47,11 @@
   fail:
     msg: "Nova configuration file not available"
   when: not nc.stat.exists
+
+- name: Check for possible symbolic link attack
+  fail:
+    msg: "Possible symbolic link attack detected"
+  when: nc.stat.islnk
 
 - name: Read nova conf file
   command: "cat {{ nova_conf_path }}"
@@ -145,27 +150,34 @@
   delegate_to: localhost
   pip:
     name: python-openstackclient,osc-placement
+  when: not offline
 
+# Following selected tasks have 'no_log: true' to protect sensitive information
 - name: Get essential variables to log into keystone
+  no_log: True
   set_fact:
     OS_USERNAME: "{{ lookup('env', 'OS_USERNAME')|d(OS_USERNAME, true) }}"
     OS_PASSWORD: "{{ lookup('env', 'OS_PASSWORD')|d(OS_PASSWORD, true) }}"
     OS_AUTH_URL: "{{ lookup('env', 'OS_AUTH_URL')|d(OS_AUTH_URL, true) }}"
+    OS_REGION_NAME: "{{ lookup('env', 'OS_REGION_NAME')|d(OS_REGION_NAME, true) }}"
     OS_PROJECT_NAME: "{{ lookup('env', 'OS_PROJECT_NAME')|d(OS_PROJECT_NAME, true) }}"
     OS_USER_DOMAIN_ID: "{{ lookup('env', 'OS_USER_DOMAIN_ID')|d(OS_USER_DOMAIN_ID, true) }}"
     OS_PROJECT_DOMAIN_ID: "{{ lookup('env', 'OS_PROJECT_DOMAIN_ID')|d(OS_PROJECT_DOMAIN_ID, true) }}"
     OS_PLACEMENT_API_VERSION: "{{ lookup('env', 'OS_PLACEMENT_API_VERSION')|d('1.6', true) }}"
 
 - name: Shorten OS CLI command
+  no_log: true
   set_fact:
     OPENSTACK_CLI: "openstack --os-auth-type password --os-auth-url {{ OS_AUTH_URL }} \
                     --os-username {{ OS_USERNAME }} --os-password {{ OS_PASSWORD }} \
-                    --os-project-domain-id {{ OS_PROJECT_DOMAIN_ID }} \
-                    --os-user-domain-id {{ OS_USER_DOMAIN_ID }} \
+                    --os-region-name {{ OS_REGION_NAME }} \
                     --os-project-name {{ OS_PROJECT_NAME }} \
+                    --os-user-domain-id {{ OS_USER_DOMAIN_ID }} \
+                    --os-project-domain-id {{ OS_PROJECT_DOMAIN_ID }} \
                     --os-placement-api-version {{ OS_PLACEMENT_API_VERSION }}"
 
 - name: Get list of OS traits
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait list -f value -c name"
@@ -173,39 +185,47 @@
   register: traits
 
 - name: Add CUSTOM_CPU_X86_INTEL_SST_BF trait to OS traits
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_X86_INTEL_SST_BF"
   when: '"CUSTOM_CPU_X86_INTEL_SST_BF" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED trait to OS traits
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED"
   when: '"CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED trait to OS traits
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED"
   when: '"CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED trait to OS traits
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED"
   when: '"CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED" not in traits.stdout_lines'
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED trait to OS traits
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} trait create CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED"
   when: '"CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED" not in traits.stdout_lines'
 
 - name: Get OS resource provider UUID
+  no_log: true
   delegate_to: localhost
-  shell: "{{ OPENSTACK_CLI }} resource provider list \
-          -f value | grep {{ ansible_hostname }} | awk '{ print $1 }'"
+  shell: "set -o pipefail && {{ OPENSTACK_CLI }} resource provider list \
+         -f value | grep {{ ansible_hostname }} | awk '{ print $1 }'"
+  args:
+    executable: /bin/bash
   changed_when: false
   register: provider_uuid
 
@@ -215,94 +235,122 @@
   when: provider_uuid.stderr | length > 0
 
 - name: Get resource provider traits
+  no_log: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait list \
             {{ provider_uuid.stdout_lines[0] }} -c name -f value"
   changed_when: false
   register: provider_traits
 
+- name: Set default empty trait_list
+  set_fact:
+    trait_list: ""
+
 - name: Build list of resource provider traits
   set_fact:
-    trait_list: '{{ trait_list|default("", true) }} --trait {{ item }}'
-  loop: "{{ provider_traits.stdout_lines|flatten(levels=1) }}"
+    trait_list: '{{ trait_list }} --trait {{ item }}'
+  loop: "{{ provider_traits.stdout_lines | flatten(levels=1) }}"
+  when: provider_traits | length > 0
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED trait to resource provider
+  no_log: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
-  when: '"CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED" not in provider_traits.stdout_lines and
-         sst_bf_profile == "FREQUENCY_FIXED_HIGH_DEDICATED"'
+  when: sst_bf_profile == "FREQUENCY_FIXED_HIGH_DEDICATED"
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED trait to resource provider
+  no_log: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
-  when: '"CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED" not in provider_traits.stdout_lines and
-         sst_bf_profile == "FREQUENCY_FIXED_HIGH_SHARED"'
+  when: sst_bf_profile == "FREQUENCY_FIXED_HIGH_SHARED"
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED trait to resource provider
+  no_log: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
-  when: '"CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED" not in provider_traits.stdout_lines and
-         sst_bf_profile == "FREQUENCY_VAR_HIGH_DEDICATED"'
+  when: sst_bf_profile == "FREQUENCY_VAR_HIGH_DEDICATED"
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED trait to resource provider
+  no_log: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
             --trait CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED
             --trait CUSTOM_CPU_X86_INTEL_SST_BF {{ provider_uuid.stdout_lines[0] }}"
-  when: '"CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED" not in provider_traits.stdout_lines and
-         sst_bf_profile == "FREQUENCY_VAR_HIGH_SHARED"'
+  when: sst_bf_profile == "FREQUENCY_VAR_HIGH_SHARED"
 
 - name: Generate dedicated fixed flavor names
   run_once: true
   set_fact:
-    flavor_names: [ "SST_BF.micro.freq-fixed.high-tier-dedicated", "SST_BF.micro.freq-fixed.normal-tier-shared",
-                    "SST_BF.tiny.freq-fixed.high-tier-dedicated", "SST_BF.tiny.freq-fixed.normal-tier-shared",
-                    "SST_BF.small.freq-fixed.high-tier-dedicated", "SST_BF.small.freq-fixed.normal-tier-shared",
-                    "SST_BF.medium.freq-fixed.high-tier-dedicated", "SST_BF.medium.freq-fixed.normal-tier-shared",
-                    "SST_BF.large.freq-fixed.high-tier-dedicated", "SST_BF.large.freq-fixed.normal-tier-shared",
-                    "SST_BF.xlarge.freq-fixed.high-tier-dedicated", "SST_BF.xlarge.freq-fixed.normal-tier-shared" ]
+    flavor_names: ["SST_BF.micro.freq-fixed.high-tier-dedicated", "SST_BF.micro.freq-fixed.normal-tier-shared",
+                   "SST_BF.tiny.freq-fixed.high-tier-dedicated", "SST_BF.tiny.freq-fixed.normal-tier-shared",
+                   "SST_BF.small.freq-fixed.high-tier-dedicated", "SST_BF.small.freq-fixed.normal-tier-shared",
+                   "SST_BF.medium.freq-fixed.high-tier-dedicated", "SST_BF.medium.freq-fixed.normal-tier-shared",
+                   "SST_BF.large.freq-fixed.high-tier-dedicated", "SST_BF.large.freq-fixed.normal-tier-shared",
+                   "SST_BF.xlarge.freq-fixed.high-tier-dedicated", "SST_BF.xlarge.freq-fixed.normal-tier-shared"]
   when: sst_bf_profile == "FREQUENCY_FIXED_HIGH_DEDICATED"
 
 - name: Generate shared fixed flavor names
   run_once: true
   set_fact:
-    flavor_names: [ "SST_BF.micro.freq-fixed.normal-tier-dedicated", "SST_BF.micro.freq-fixed.high-tier-shared",
-                    "SST_BF.tiny.freq-fixed.normal-tier-dedicated", "SST_BF.tiny.freq-fixed.high-tier-shared",
-                    "SST_BF.small.freq-fixed.normal-tier-dedicated", "SST_BF.small.freq-fixed.high-tier-shared",
-                    "SST_BF.medium.freq-fixed.normal-tier-dedicated", "SST_BF.medium.freq-fixed.high-tier-shared",
-                    "SST_BF.large.freq-fixed.normal-tier-dedicated", "SST_BF.large.freq-fixed.high-tier-shared",
-                    "SST_BF.xlarge.freq-fixed.normal-tier-dedicated", "SST_BF.xlarge.freq-fixed.high-tier-shared" ]
+    flavor_names: ["SST_BF.micro.freq-fixed.normal-tier-dedicated", "SST_BF.micro.freq-fixed.high-tier-shared",
+                   "SST_BF.tiny.freq-fixed.normal-tier-dedicated", "SST_BF.tiny.freq-fixed.high-tier-shared",
+                   "SST_BF.small.freq-fixed.normal-tier-dedicated", "SST_BF.small.freq-fixed.high-tier-shared",
+                   "SST_BF.medium.freq-fixed.normal-tier-dedicated", "SST_BF.medium.freq-fixed.high-tier-shared",
+                   "SST_BF.large.freq-fixed.normal-tier-dedicated", "SST_BF.large.freq-fixed.high-tier-shared",
+                   "SST_BF.xlarge.freq-fixed.normal-tier-dedicated", "SST_BF.xlarge.freq-fixed.high-tier-shared"]
   when: sst_bf_profile == "FREQUENCY_FIXED_HIGH_SHARED"
 
 - name: Generate dedicated var flavor names
   run_once: true
   set_fact:
-    flavor_names: [ "SST_BF.micro.freq-var.high-tier-dedicated", "SST_BF.micro.freq-var.normal-tier-shared",
-                    "SST_BF.tiny.freq-var.high-tier-dedicated", "SST_BF.tiny.freq-var.normal-tier-shared",
-                    "SST_BF.small.freq-var.high-tier-dedicated", "SST_BF.small.freq-var.normal-tier-shared",
-                    "SST_BF.medium.freq-var.high-tier-dedicated", "SST_BF.medium.freq-var.normal-tier-shared",
-                    "SST_BF.large.freq-var.high-tier-dedicated", "SST_BF.large.freq-var.normal-tier-shared",
-                    "SST_BF.xlarge.freq-var.high-tier-dedicated", "SST_BF.xlarge.freq-var.normal-tier-shared" ]
+    flavor_names: ["SST_BF.micro.freq-var.high-tier-dedicated", "SST_BF.micro.freq-var.normal-tier-shared",
+                   "SST_BF.tiny.freq-var.high-tier-dedicated", "SST_BF.tiny.freq-var.normal-tier-shared",
+                   "SST_BF.small.freq-var.high-tier-dedicated", "SST_BF.small.freq-var.normal-tier-shared",
+                   "SST_BF.medium.freq-var.high-tier-dedicated", "SST_BF.medium.freq-var.normal-tier-shared",
+                   "SST_BF.large.freq-var.high-tier-dedicated", "SST_BF.large.freq-var.normal-tier-shared",
+                   "SST_BF.xlarge.freq-var.high-tier-dedicated", "SST_BF.xlarge.freq-var.normal-tier-shared"]
   when: sst_bf_profile == "FREQUENCY_VAR_HIGH_DEDICATED"
 
 - name: Generate shared var flavor names
   run_once: true
   set_fact:
-    flavor_names: [ "SST_BF.micro.freq-var.normal-tier-dedicated", "SST_BF.micro.freq-var.high-tier-shared",
-                    "SST_BF.tiny.freq-var.normal-tier-dedicated", "SST_BF.tiny.freq-var.high-tier-shared",
-                    "SST_BF.small.freq-var.normal-tier-dedicated", "SST_BF.small.freq-var.high-tier-shared",
-                    "SST_BF.medium.freq-var.normal-tier-dedicated", "SST_BF.medium.freq-var.high-tier-shared",
-                    "SST_BF.large.freq-var.normal-tier-dedicated", "SST_BF.large.freq-var.high-tier-shared",
-                    "SST_BF.xlarge.freq-var.normal-tier-dedicated", "SST_BF.xlarge.freq-var.high-tier-shared" ]
+    flavor_names: ["SST_BF.micro.freq-var.normal-tier-dedicated", "SST_BF.micro.freq-var.high-tier-shared",
+                   "SST_BF.tiny.freq-var.normal-tier-dedicated", "SST_BF.tiny.freq-var.high-tier-shared",
+                   "SST_BF.small.freq-var.normal-tier-dedicated", "SST_BF.small.freq-var.high-tier-shared",
+                   "SST_BF.medium.freq-var.normal-tier-dedicated", "SST_BF.medium.freq-var.high-tier-shared",
+                   "SST_BF.large.freq-var.normal-tier-dedicated", "SST_BF.large.freq-var.high-tier-shared",
+                   "SST_BF.xlarge.freq-var.normal-tier-dedicated", "SST_BF.xlarge.freq-var.high-tier-shared"]
   when: sst_bf_profile == "FREQUENCY_VAR_HIGH_SHARED"
 
 - name: Get list of OS flavors
+  no_log: true
+  run_once: true
+  delegate_to: localhost
+  command: "{{ OPENSTACK_CLI }} flavor list -c Name -f value"
+  changed_when: false
+  register: flavors
+
+- name: Remove any existing SST-BF flavors
+  no_log: true
+  run_once: true
+  delegate_to: localhost
+  command: "{{ OPENSTACK_CLI }} flavor delete {{ item }}"
+  loop: "{{ flavors.stdout_lines }}"
+  when: '"SST_BF.micro.freq-" in item or
+        "SST_BF.tiny.freq-" in item or
+        "SST_BF.small.freq-" in item or
+        "SST_BF.medium.freq-" in item or
+        "SST_BF.large.freq-" in item or
+        "SST_BF.xlarge.freq-" in item'
+
+- name: Refresh list of OS flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor list -c Name -f value"
@@ -310,6 +358,7 @@
   register: flavors
 
 - name: Create SST-BF flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor create --ram {{ item[1] }} --vcpus {{ item[2] }}
@@ -318,20 +367,21 @@
   register: flavor_create
   failed_when: "flavor_create.rc != 0 and 'already exists' not in flavor_create.stderr"
   loop:
-    - [ "{{ flavor_names[0] }}", "128", "1", "1"]
-    - [ "{{ flavor_names[1] }}", "128", "1", "1"]
-    - [ "{{ flavor_names[2] }}", "512", "1", "1" ]
-    - [ "{{ flavor_names[3] }}", "512", "1", "1" ]
-    - [ "{{ flavor_names[4] }}", "2048", "1", "20"]
-    - [ "{{ flavor_names[5] }}", "2048", "1", "20"]
-    - [ "{{ flavor_names[6] }}", "4096", "2", "40"]
-    - [ "{{ flavor_names[7] }}", "4096", "2", "40"]
-    - [ "{{ flavor_names[8] }}", "8192", "4", "80"]
-    - [ "{{ flavor_names[9] }}", "8192", "4", "80"]
-    - [ "{{ flavor_names[10] }}", "16384", "8", "160"]
-    - [ "{{ flavor_names[11] }}", "16384", "8", "160"]
+    - ["{{ flavor_names[0] }}", "128", "1", "1"]
+    - ["{{ flavor_names[1] }}", "128", "1", "1"]
+    - ["{{ flavor_names[2] }}", "512", "1", "1"]
+    - ["{{ flavor_names[3] }}", "512", "1", "1"]
+    - ["{{ flavor_names[4] }}", "2048", "1", "20"]
+    - ["{{ flavor_names[5] }}", "2048", "1", "20"]
+    - ["{{ flavor_names[6] }}", "4096", "2", "40"]
+    - ["{{ flavor_names[7] }}", "4096", "2", "40"]
+    - ["{{ flavor_names[8] }}", "8192", "4", "80"]
+    - ["{{ flavor_names[9] }}", "8192", "4", "80"]
+    - ["{{ flavor_names[10] }}", "16384", "8", "160"]
+    - ["{{ flavor_names[11] }}", "16384", "8", "160"]
 
 - name: Gather SST_BF flavors properties attribute
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor show {{ item }} -c properties -f value"
@@ -354,6 +404,7 @@
                       {%- endfor -%}"
 
 - name: Add SST-BF capable trait requirement to flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set
@@ -362,6 +413,7 @@
   loop: "{{ flavor_names }}"
 
 - name: Add dedicated CPU policy to flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set --property hw:cpu_policy=dedicated {{ item }}"
@@ -375,6 +427,7 @@
     - "{{ flavor_names[10] }}"
 
 - name: Add shared CPU policy to flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set --property hw:cpu_policy=shared
@@ -389,6 +442,7 @@
     - "{{ flavor_names[11] }}"
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED trait requirement to flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set \
@@ -397,6 +451,7 @@
   loop: "{{ flavor_names }}"
 
 - name: Add CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED trait requirement to flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set
@@ -405,6 +460,7 @@
   loop: "{{ flavor_names }}"
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED trait requirement to flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set \
@@ -413,6 +469,7 @@
   loop: "{{ flavor_names }}"
 
 - name: Add CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED trait requirement to flavors
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor set
@@ -422,6 +479,7 @@
 
 # Bug in OSCLI referencing flavors by name. Need to get flavor ID to compensate.
 - name: Get flavor IDs
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} flavor show {{ item }} -c id -f value"
@@ -430,6 +488,7 @@
   loop: "{{ flavor_names }}"
 
 - name: Get flavor descriptions
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: "{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor show
@@ -444,6 +503,7 @@
     flavors_desc_l: "{{ flavor_descriptions.results | map(attribute='stdout') | list }}"
 
 - name: Set flavor description for FREQUENCY_FIXED_HIGH_DEDICATED profile
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set
@@ -455,6 +515,7 @@
   loop: "{{ flavor_ids.results|flatten(levels=1) }}"
 
 - name: Set flavor description for FREQUENCY_FIXED_HIGH_SHARED profile
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set
@@ -466,6 +527,7 @@
   loop: "{{ flavor_ids.results|flatten(levels=1) }}"
 
 - name: Set flavor description for FREQUENCY_VAR_HIGH_DEDICATED profile
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set
@@ -477,6 +539,7 @@
   loop: "{{ flavor_ids.results|flatten(levels=1) }}"
 
 - name: Set flavor description for FREQUENCY_VAR_HIGH_SHARED profile
+  no_log: true
   run_once: true
   delegate_to: localhost
   command: '{{ OPENSTACK_CLI }} --os-compute-api-version 2.55 flavor set

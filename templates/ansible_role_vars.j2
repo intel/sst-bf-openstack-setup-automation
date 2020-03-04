@@ -1,0 +1,23 @@
+---
+sst_bf_profile: {{ sst_bf_profile }}
+configure_os_only: {{ configure_os_only }}
+nova_conf_path: {{ nova_conf_path }}
+cpu_allocation_ratio: {{ cpu_allocation_ratio }}
+skip_ovs_dpdk_config: {{ skip_ovs_dpdk_config }}
+ovs_dpdk_installed: {{ ovs_dpdk_installed }}
+offline: {{ offline }}
+nova_service_name: {{ nova_service_name }}
+{{ host_description | to_nice_yaml }}
+ovs_core_high_priority: {{ ovs_core_high_priority }}
+ovs_dpdk_nr_1g_pages: {{ ovs_dpdk_nr_1g_pages }}
+ovs_dpdk_nr_2m_pages: {{ ovs_dpdk_nr_2m_pages }}
+ovs_dpdk_driver: {{ ovs_dpdk_driver }}
+ovs_service_name: {{ ovs_service_name }}
+ovs_datapath: {{ ovs_datapath }}
+ovs_dpdk_interface_type: {{ ovs_dpdk_interface_type }}
+{% if ovs_dpdk_lcore_mask is defined %}lcore_mask: "{{ ovs_dpdk_lcore_mask.stdout_lines[0] }}"
+{% endif %}
+{% if ovs_dpdk_pmd_mask is defined %}pmd_mask: "{{ ovs_dpdk_pmd_mask.stdout_lines[0] }}"
+{% endif %}
+{% if secrets_path is defined %}secrets_path: "{{ secrets_path }}"
+{% endif %}

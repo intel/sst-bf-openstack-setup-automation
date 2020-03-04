@@ -1,3 +1,4 @@
+---
 galaxy_info:
   author: Sohaib Iqbal, Martin Kennelly, Mathana Sreedaran
   description: Configure Openstack compute host with SST-BF. Optionally, pin OpenvSwitch-DPDK to

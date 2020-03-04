@@ -1,0 +1,36 @@
+---
+- name: Converge
+  hosts: all
+  become: yes
+  vars:
+    molecule_test: True
+    secrets_path: # user must define absolute path to OpenStack secrets
+    skip_ovs_dpdk_config: False
+    ovs_dpdk_installed: False
+    host_description:
+      numa_nodes:
+        0:
+          interfaces:
+            eno1:
+              pci_address: "0000:af:00.0"
+          dpdk_socket_mem: 1024
+          no_physical_cores_pinned: 4
+        1:
+          dpdk_socket_mem: 1024
+          no_physical_cores_pinned: 2
+      bridge_mappings:
+        ovs-brnew: ['eno1']
+  tasks:
+    - name: Get OpenStack credentials
+      no_log: true
+      include: ../resources/get_os_secrets.yml
+
+    - name: Set and get SST-BF
+      include_role:
+        name: "intel.sst_bf_openstack_setup_automation"
+
+    - name: Configure OS for SST-BF
+      vars:
+        configure_os_only: true
+      include_role:
+        name: "intel.sst_bf_openstack_setup_automation"

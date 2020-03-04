@@ -22,19 +22,22 @@
   tasks:
     - name: Configure Nova compute with SST-BF
       include_role:
-       name: "intel.sst_bf_openstack_setup_automation"
+        name: "intel.sst_bf_openstack_setup_automation"
 
-# [ Insert role to install Openstack Nova Compute here ]
-# Openstack Nova compute must be installed before running the next task
+    # [ Insert role to install Openstack Nova Compute here ]
+    # Openstack Nova compute must be installed before running the next task
 
     - name: Write priority + normal CPUs & SST-BF trait info to Nova
       vars:
+        # For demonstrative purposes - Encrypt credentials using Ansible Vault
         OS_USERNAME: admin
         OS_PASSWORD: admin
         OS_AUTH_URL: https://192.168.1.1
         OS_PROJECT_NAME: default
         OS_USER_DOMAIN_ID: default
         OS_PROJECT_DOMAIN_ID: demo
+        OS_REGION_NAME: RegionOne
+        OS_PLACEMENT_API_VERSION: 1.6
         configure_os_only: true
       include_role:
         name: "intel.sst_bf_openstack_setup_automation"

@@ -1,0 +1,395 @@
+---
+- name: Cleanup
+  hosts: all
+  become: yes
+  vars_files:
+    - "../../defaults/main.yml"
+  vars:
+   secrets_path: # user must define absolute path to OpenStack secrets
+  tasks:
+    - name: Gather file information outputted by Ansible role
+      delegate_to: localhost
+      stat:
+        path: "/tmp/sst_bf_role_vars_{{ ansible_hostname }}.yaml"
+      register: var_file
+
+    - name: Import variables from Ansible role run if present
+      delegate_to: localhost
+      block:
+        - name: Check for symbolic link attack
+          fail:
+            msg: "Possible symbolic link attack on file: \
+                  '/tmp/sst_bf_role_vars_{{ ansible_hostname }}.yaml'"
+          when: var_file.stat.islnk is defined and var_file.stat.islnk
+
+        - name: Import vars which were outputted by Ansible role run
+          include_vars:
+            file: "/tmp/sst_bf_role_vars_{{ ansible_hostname }}.yaml"
+      when: var_file.stat.exists
+
+    - name: Get OpenStack credentials
+      no_log: true
+      include: get_os_secrets.yml
+
+    - name: Attempt to revert any SST-BF configuration
+      block:
+        - name: Create temporary directory
+          delegate_to: localhost
+          run_once: true
+          tempfile:
+            state: directory
+            suffix: sst_bf_ansible
+          register: tempfolder
+          when: not offline
+
+        - name: Change permissions of temporary directory to ensure read & execute
+          delegate_to: localhost
+          run_once: true
+          file:
+            path: "{{ tempfolder.path }}"
+            mode: '0755'
+          when: not offline
+
+        - name: Set folder name for temporary directory
+          run_once: true
+          set_fact:
+            repo_path: "{{ tempfolder.path }}"
+          when: not offline
+
+        - name: Set offline folder directory
+          run_once: true
+          set_fact:
+            repo_path: /tmp/CommsPowerManagement
+          when: offline
+
+        - name: Pull SST-BF code from git
+          run_once: true
+          git:
+            repo: https://github.com/intel/CommsPowerManagement.git
+            dest: "{{ repo_path }}"
+            clone: yes
+            force: yes
+            accept_hostkey: yes
+            version: 05509e90fc082538609198c05179a52971bb5897
+          delegate_to: localhost
+
+        - name: Register supporting script repository
+          stat:
+            path: "{{ repo_path }}"
+          delegate_to: localhost
+          register: support_repo_stat
+
+        - name: Ensure supporting git repository is present
+          fail:
+            msg: "Repository '{{ repo_path }}' does not exist in Ansible controller"
+          when: not support_repo_stat.stat.exists
+
+        - name: Check for possible symbolic link attack
+          fail:
+            msg: "Possible symbolic link attack detected."
+          when: support_repo_stat.stat.islnk
+
+        - name: Register supporting SST-BF python script
+          stat:
+            path: "{{ repo_path }}"
+          delegate_to: localhost
+          register: py_support_stat
+
+        - name: Ensure supporting SST-BF python script exists
+          fail:
+            msg: "Supporting python script sst_bf.py doesnt exist"
+          when: not py_support_stat.stat.exists
+
+        - name: Check for python script symbolic link attack
+          fail:
+            msg: "Possible symbolic link attack on supporting python script sst_bf.py"
+          when: py_support_stat.stat.islnk
+
+        - name: Load MSR kernel module
+          modprobe:
+            name: msr
+            state: present
+
+        - name: Revert SST-BF if it was previously enabled
+          script: "{{ repo_path }}/sst_bf.py -r"
+      always:
+        - name: Remove dependencies
+          file:
+            path: "{{ repo_path }}"
+            state: absent
+
+    - name: Check for dpdk-init in ovsdb
+      command: ovs-vsctl get Open_vSwitch . other_config:dpdk-init
+      register: dpdk_init_check
+      failed_when: dpdk_init_check.rc > 1
+
+    - name: Remove OVS-DPDK configuration
+      block:
+        - name: Remove GRUB CMD line key-values
+          replace:
+            path: /etc/default/grub
+            regexp: "{{ item }}=[']?[a-zA-Z0-9,-]+[']?"
+            replace: ""
+          loop:
+            - "default_hugepagesz"
+            - "hugepagesz"
+            - "hugepages"
+            - "isolcpus"
+
+        - name: Update grub
+          command: update-grub
+          when: ansible_distribution == 'Ubuntu'
+
+        - name: Update grub
+          shell: grub2-mkconfig -o "$(readlink -e /etc/grub2.conf)"
+          when: ansible_distribution != 'Ubuntu'
+
+        - name: Remove DPDK files
+          file:
+            path: "/etc/dpdk/{{ item }}"
+            state: absent
+          loop:
+            - "dpdk.conf"
+            - "interfaces"
+
+        - name: Remove DPDK init
+          command: "ovs-vsctl --no-wait remove Open_vSwitch . \
+                    other_config dpdk-init"
+          changed_when: true
+
+        - name: Remove DPDK lcore mask
+          command: "ovs-vsctl --no-wait remove Open_vSwitch . \
+                    other_config dpdk-lcore-mask"
+          changed_when: true
+
+        - name: Remove DPDK PMD mask
+          command: "ovs-vsctl --no-wait remove Open_vSwitch . \
+                    other_config pmd-cpu-mask"
+          changed_when: true
+
+        - name: Remove DPDK socket memory
+          command: "ovs-vsctl --no-wait remove Open_vSwitch . \
+                    other_config dpdk-socket-mem"
+          changed_when: true
+
+        - name: Get bridge name
+          set_fact:
+            ovs_bridge_name: "{{ item.key }}"
+          loop: "{{ host_description['bridge_mappings'] | dict2items }}"
+
+        - name: Remove network provider bridges
+          openvswitch_bridge:
+            bridge: "{{ ovs_bridge_name }}"
+            set: "bridge {{ ovs_bridge_name }} datapath_type='{{ ovs_datapath }}'"
+            fail_mode: secure
+            state: absent
+
+        - name: Retain openvswitch-switch
+          command: apt-mark manual openvswitch-switch
+          when: ansible_distribution == 'Ubuntu'
+
+        - name: Autoremove packages from apt
+          apt:
+            name: "{{ item }}"
+            state: absent
+            autoremove: yes
+          loop:
+            - "dpdk-igb-uio-dkms"
+            - "openvswitch-switch-dpdk"
+          when: ansible_distribution == 'Ubuntu' and not offline
+
+        - name: Remove kernel module from /etc/modules
+          lineinfile:
+            path: /etc/modules
+            line: "{{ ovs_dpdk_driver }}"
+            regexp: "^{{ ovs_dpdk_driver }}"
+            state: absent
+
+        - name: Remove auto loading of kernel modules
+          file:
+            path: /etc/modules-load.d/ovs-dpdk
+            state: absent
+          when: ansible_distribution != 'Ubuntu'
+
+        - name: Remove openvswitch module from /etc/modules
+          lineinfile:
+            path: /etc/modules
+            line: 'openvswitch'
+            regexp: '^openvswitch'
+            state: absent
+          when: ansible_distribution == 'Ubuntu'
+
+        - name: Reboot
+          shell: "sleep 1 && shutdown -r now 'Ansible update to GRUB - forced restart'"
+          changed_when: true
+          async: 1
+          poll: 0
+
+        - name: Wait for reboot to complete
+          wait_for_connection:
+            connect_timeout: 20
+            sleep: 5
+            delay: 5
+            timeout: 600
+      when: dpdk_init_check.rc == 0
+
+    - name: Register nova configuration file
+      stat:
+        path: "{{ nova_conf_path }}"
+      changed_when: false
+      register: nc
+
+    - name: Check if Nova configuration file is available
+      fail:
+        msg: "Nova configuration file not available"
+      when: not nc.stat.exists
+
+    - name: Read nova conf file
+      command: "cat {{ nova_conf_path }}"
+      changed_when: false
+      register: nova_conf
+
+    - name: Remove existing cpu_shared_set definition
+      lineinfile:
+        path: "{{ nova_conf_path }}"
+        regexp: "^cpu_shared_set"
+        state: absent
+
+    - name: Remove existing cpu_dedicated_set definition
+      lineinfile:
+        path: "{{ nova_conf_path }}"
+        regexp: "^cpu_dedicated_set"
+        state: absent
+
+    - name: Remove existing cpu_allocation_ratio
+      lineinfile:
+        path: "{{ nova_conf_path }}"
+        regexp: "^cpu_allocation_ratio"
+        state: absent
+
+    - name: Restart Nova for changes to take effect
+      systemd:
+        name: "{{ nova_service_name }}"
+        daemon_reload: yes
+        state: restarted
+
+    - name: Ensure we have OS CLI in order to clean up OS state
+      delegate_to: localhost
+      pip:
+        name: python-openstackclient,osc-placement
+      when: not offline
+
+    - name: Shorten OS CLI command
+      no_log: true
+      set_fact:
+        OPENSTACK_CLI: "openstack --os-auth-type password --os-auth-url {{ OS_AUTH_URL }} \
+                        --os-username {{ OS_USERNAME }} --os-password {{ OS_PASSWORD }} \
+                        --os-project-domain-id {{ OS_PROJECT_DOMAIN_ID }} \
+                        --os-user-domain-id {{ OS_USER_DOMAIN_ID }} \
+                        --os-project-name {{ OS_PROJECT_NAME }} \
+                        --os-region-name {{ OS_REGION_NAME }} \
+                        --os-placement-api-version {{ OS_PLACEMENT_API_VERSION }}"
+
+    - name: Get list of OS flavors
+      no_log: true
+      delegate_to: localhost
+      command: "{{ OPENSTACK_CLI }} flavor list -c Name -f value"
+      changed_when: false
+      register: flavors
+
+    - name: Build list of possible flavor names
+      set_fact:
+        flavor_names: ["SST_BF.micro.freq-fixed.high-tier-dedicated", "SST_BF.micro.freq-fixed.normal-tier-shared",
+                       "SST_BF.tiny.freq-fixed.high-tier-dedicated", "SST_BF.tiny.freq-fixed.normal-tier-shared",
+                       "SST_BF.small.freq-fixed.high-tier-dedicated", "SST_BF.small.freq-fixed.normal-tier-shared",
+                       "SST_BF.medium.freq-fixed.high-tier-dedicated", "SST_BF.medium.freq-fixed.normal-tier-shared",
+                       "SST_BF.large.freq-fixed.high-tier-dedicated", "SST_BF.large.freq-fixed.normal-tier-shared",
+                       "SST_BF.xlarge.freq-fixed.high-tier-dedicated", "SST_BF.xlarge.freq-fixed.normal-tier-shared",
+                       "SST_BF.micro.freq-fixed.normal-tier-dedicated", "SST_BF.micro.freq-fixed.high-tier-shared",
+                       "SST_BF.tiny.freq-fixed.normal-tier-dedicated", "SST_BF.tiny.freq-fixed.high-tier-shared",
+                       "SST_BF.small.freq-fixed.normal-tier-dedicated", "SST_BF.small.freq-fixed.high-tier-shared",
+                       "SST_BF.medium.freq-fixed.normal-tier-dedicated", "SST_BF.medium.freq-fixed.high-tier-shared",
+                       "SST_BF.large.freq-fixed.normal-tier-dedicated", "SST_BF.large.freq-fixed.high-tier-shared",
+                       "SST_BF.xlarge.freq-fixed.normal-tier-dedicated", "SST_BF.xlarge.freq-fixed.high-tier-shared",
+                       "SST_BF.micro.freq-var.high-tier-dedicated", "SST_BF.micro.freq-var.normal-tier-shared",
+                       "SST_BF.tiny.freq-var.high-tier-dedicated", "SST_BF.tiny.freq-var.normal-tier-shared",
+                       "SST_BF.small.freq-var.high-tier-dedicated", "SST_BF.small.freq-var.normal-tier-shared",
+                       "SST_BF.medium.freq-var.high-tier-dedicated", "SST_BF.medium.freq-var.normal-tier-shared",
+                       "SST_BF.large.freq-var.high-tier-dedicated", "SST_BF.large.freq-var.normal-tier-shared",
+                       "SST_BF.xlarge.freq-var.high-tier-dedicated", "SST_BF.xlarge.freq-var.normal-tier-shared",
+                       "SST_BF.micro.freq-var.normal-tier-dedicated", "SST_BF.micro.freq-var.high-tier-shared",
+                       "SST_BF.tiny.freq-var.normal-tier-dedicated", "SST_BF.tiny.freq-var.high-tier-shared",
+                       "SST_BF.small.freq-var.normal-tier-dedicated", "SST_BF.small.freq-var.high-tier-shared",
+                       "SST_BF.medium.freq-var.normal-tier-dedicated", "SST_BF.medium.freq-var.high-tier-shared",
+                       "SST_BF.large.freq-var.normal-tier-dedicated", "SST_BF.large.freq-var.high-tier-shared",
+                       "SST_BF.xlarge.freq-var.normal-tier-dedicated", "SST_BF.xlarge.freq-var.high-tier-shared"]
+
+    - name: Remove SST-BF flavors
+      no_log: true
+      delegate_to: localhost
+      command: "{{ OPENSTACK_CLI }} flavor delete {{ item }}"
+      when: item in flavors.stdout_lines
+      loop: "{{ flavor_names | flatten(levels=1) }}"
+
+    - name: Get OS resource provider UUID
+      no_log: true
+      delegate_to: localhost
+      shell: "{{ OPENSTACK_CLI }} resource provider list \
+              -f value | grep {{ ansible_hostname }} | awk '{ print $1 }'"
+      changed_when: false
+      register: provider_uuid
+
+    - name: Ensure we got non-blank provider UUID
+      fail:
+        msg: "Unable to get resource provider with name '{{ ansible_hostname }}'"
+      when: provider_uuid.stderr | length > 0
+
+    - name: Get resource provider traits
+      no_log: true
+      delegate_to: localhost
+      command: "{{ OPENSTACK_CLI }} resource provider trait list \
+                {{ provider_uuid.stdout_lines[0] }} -c name -f value"
+      changed_when: false
+      register: provider_traits
+
+    - name: Build list of SST-BF traits
+      set_fact:
+        sst_bf_trait_list: ["CUSTOM_CPU_FREQUENCY_FIXED_HIGH_DEDICATED",
+                            "CUSTOM_CPU_FREQUENCY_FIXED_HIGH_SHARED",
+                            "CUSTOM_CPU_FREQUENCY_VAR_HIGH_DEDICATED",
+                            "CUSTOM_CPU_FREQUENCY_VAR_HIGH_SHARED",
+                            "CUSTOM_CPU_X86_INTEL_SST_BF"]
+
+    - name: Build new list of resource provider traits
+      set_fact:
+        trait_list: '{{ trait_list|default("", true) }} --trait {{ item }}'
+      loop: "{{ provider_traits.stdout_lines|flatten(levels=1) }}"
+      when: item not in sst_bf_trait_list and
+            provider_traits.stdout_lines | length > 0
+
+    - name: Set cleaned trait list to resource provider
+      no_log: true
+      delegate_to: localhost
+      command: "{{ OPENSTACK_CLI }} resource provider trait set {{ trait_list }}
+                {{ provider_uuid.stdout_lines[0] }}"
+      when: trait_list is defined
+
+    - name: Get list of OS traits
+      no_log: true
+      delegate_to: localhost
+      command: "{{ OPENSTACK_CLI }} trait list -f value -c name"
+      changed_when: false
+      register: traits
+
+    - name: Remove SST-BF traits
+      no_log: true
+      delegate_to: localhost
+      command: "{{ OPENSTACK_CLI }} trait delete {{ item }}"
+      loop: "{{ sst_bf_trait_list | flatten(levels=1) }}"
+      when: item in traits.stdout_lines
+
+    - name: Remove role created variables yaml file
+      delegate_to: localhost
+      file:
+        path: "/tmp/sst_bf_role_vars_{{ ansible_hostname }}.yaml"
+        state: absent

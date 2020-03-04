@@ -13,6 +13,6 @@
 # limitations under the License.
 
 ---
-- name: "Get high or normal priority OVS-DPDK PMD pinned core(s) for each NUMA node"
+- name: "Get high or normal priority core(s) from a specific NUMA node"
   include: get_core.yml
   with_sequence: start=1 end={{ no_cores_pinned | int }}

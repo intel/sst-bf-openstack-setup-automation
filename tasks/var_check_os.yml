@@ -38,3 +38,20 @@
     msg: Ensure nova_service_name is defined and a string
   when: nova_service_name is not defined or
         nova_service_name is not string
+
+- name: Verify OpenStack username & password are defined
+  fail:
+    msg: Please specify Ansible variables OS_USERNAME & OS_PASSWORD
+  when: OS_USERNAME is undefined or
+        OS_PASSWORD is undefined
+
+- name: Verify OpenStack Ansible variables are defined
+  fail:
+    msg: >
+      Please specify Ansible variables OS_AUTH_URL, OS_REGION_NAME,
+      OS_PROJECT_NAME, OS_USER_DOMAIN_ID and OS_PLACEMENT_API_VERSION
+  when: OS_AUTH_URL is undefined or
+        OS_REGION_NAME is undefined or
+        OS_PROJECT_NAME is undefined or
+        OS_USER_DOMAIN_ID is undefined or
+        OS_PLACEMENT_API_VERSION is undefined

@@ -55,11 +55,6 @@
     core_number: "{{ normal_cores_l | intersect(numa_node_cpus.stdout_lines) | first }}"
   when: not ovs_core_high_priority
 
-- name: Get a single core
-  command: "cat /sys/devices/system/cpu/cpu{{ core_number }}/topology/core_id"
-  register: core_id_l
-  when: not sibling_needed
-
 - name: Get a core siblings
   command: "cat /sys/devices/system/cpu/cpu{{ core_number }}/topology/thread_siblings_list"
   register: siblings_l
@@ -72,7 +67,7 @@
 
 - name: Gather single core information
   set_fact:
-    core_l: "{{ core_id_l.stdout_lines[0] | list }}"
+    core_l: "{{ [ core_number ] }}"
   when: not sibling_needed
 
 - name: Remove core(s) from high list
@@ -85,6 +80,6 @@
     normal_cores_l: "{{ normal_cores_l | difference(core_l) }}"
   when: not ovs_core_high_priority
 
-- name: Add OVS-DPDK core(s) to list
+- name: Add core(s) to list
   set_fact:
     pinned_cores_l: "{{ pinned_cores_l + core_l }}"

@@ -1,0 +1,61 @@
+---
+dependency:
+  name: galaxy
+driver:
+  name: delegated
+  options:
+    managed: False
+    login_cmd_template: 'ssh {instance}'
+    ansible_connection_options:
+      ansible_connection: ssh
+lint:
+  name: yamllint
+  options:
+    config-data:
+      extends: default
+      rules:
+        braces: {max-spaces-inside: 1, level: error}
+        brackets: {max-spaces-inside: 1, level: error}
+        colons: {max-spaces-after: -1, level: error}
+        commas: {max-spaces-after: -1, level: error}
+        comments: disable
+        comments-indentation: disable
+        document-start: disable
+        empty-lines: {max: 3, level: error}
+        hyphens: {level: error}
+        indentation: disable
+        key-duplicates: enable
+        line-length: disable
+        new-line-at-end-of-file: disable
+        new-lines: {type: unix}
+        trailing-spaces: disable
+        truthy: disable
+platforms:
+  - name: # target-hostname-here
+provisioner:
+  name: ansible
+  playbooks:
+    cleanup: ../resources/cleanup.yml
+  lint:
+    name: ansible-lint
+verifier:
+  name: testinfra
+  directory: ../resources/tests
+  lint:
+    name: flake8
+    options:
+      # F811 'redefinition of ..' is an incorrect lint warning for test cases
+      # F401 ' .. imported but unused' is an incorrect lint warning. Import is
+      # utilised in test fixtures
+      # W503 'Line break occurred before a binary operator'. This code style
+      # has been depreciated {ref: https://www.flake8rules.com/rules/W504.html}
+      ignore: F811, F401, W503
+scenario:
+  name: scenario-2
+  test_sequence:
+    - lint
+    - cleanup
+    - syntax
+    - converge
+    - verify
+    - cleanup

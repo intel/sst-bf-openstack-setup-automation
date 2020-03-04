@@ -1,0 +1,21 @@
+---
+- name: Converge
+  hosts: all
+  become: yes
+  vars:
+    molecule_test: True
+    secrets_path: # user must define absolute path to OpenStack secrets
+  tasks:
+    - name: Get OpenStack credentials
+      no_log: true
+      include: ../resources/get_os_secrets.yml
+
+    - name: Set and get SST-BF
+      include_role:
+        name: "intel.sst_bf_openstack_setup_automation"
+
+    - name: Configure OS for SST-BF
+      vars:
+        configure_os_only: true
+      include_role:
+        name: "intel.sst_bf_openstack_setup_automation"

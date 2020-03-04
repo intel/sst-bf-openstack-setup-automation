@@ -55,7 +55,7 @@ offline: false
 
 # A restart of Nova is required to acquire changes from Nova conf
 restart_nova: true
-nova_service_name: devstack@n*
+nova_service_name: devstack@n-cpu.service
 
 ## Key-value pairs below need configuration if you are installing
 ## and configuring OVS-DPDK
@@ -64,28 +64,26 @@ nova_service_name: devstack@n*
 # Host description can be described for a group of targets
 # in group_vars
 host_description:
-# NUMA nodes definition
+  # NUMA nodes definition
   numa_nodes:
-#   NUMA Node X (integer)
+    # NUMA Node X (integer)
     0:
-#     Description of interfaces on NUMA X
+      # Description of interfaces on NUMA X
       interfaces:
         eno1:
-          pci_address: "0000:3d:00.1"
-#       eno2:
-#          pci_address: "0000:3d:00.1"
-#     DPDK socket memory allocated to this NUMA node
+          pci_address: "0000:af:00.0"
+      # DPDK socket memory allocated to this NUMA node
       dpdk_socket_mem: 1024
-#     Physical cores pinned to PMD on this NUMA node
+      # Physical cores pinned to PMD on this NUMA node
       no_physical_cores_pinned: 4
     1:
       dpdk_socket_mem: 1024
-      no_physical_cores_pinned: 0
-# Description of bridges to be created
+      no_physical_cores_pinned: 2
+  # Description of bridges to be created
   bridge_mappings:
-#   Bridge name (key) and the interface name (value) it is bonded to.
-#   Interface must be declared in numa_nodes definition.
-    ovs-brnew: 'eno1'
+    # Bridge name (key) and list of interface(s) it is binded to
+    # Interface name(s) must be declared in numa_nodes definition
+    ovs-brnew: ['eno1']
 
 # Pin DPDK PMD to priority cores if true
 # otherwise pin to normal cores
@@ -104,11 +102,11 @@ ovs_dpdk_driver: vfio-pci
 # OVS systemctl service name
 ovs_service_name: openvswitch-switch
 
-# DPDK systemctl service name
-dpdk_service_name: dpdk
-
 # Userspace datapath type for OVS bridge creation
 ovs_datapath: netdev
 
 # DPDK interface type
 ovs_dpdk_interface_type: dpdk
+
+# No. of normal priority logical cores to pin to OVS-DPDK's lcore
+no_ovs_dpdk_lcore_pinned: 1

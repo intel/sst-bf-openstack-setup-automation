@@ -14,6 +14,11 @@
 
 
 ---
+- name: Check if distribution is supported
+  fail:
+    msg: "Unsupported distribution"
+  when: ansible_distribution != 'Ubuntu'
+
 - name: Check Required Ansible Variables
   include_tasks: var_check.yml
 
@@ -25,6 +30,18 @@
   include_tasks: setup_ovs_dpdk.yml
   when: not skip_ovs_dpdk_config and not configure_os_only
 
+- name: Re-apply SST-BF after restart of host
+  include_tasks: set_get_sst_bf.yml
+  when: not skip_ovs_dpdk_config and not configure_os_only
+
 - name: Configure Openstack
   include_tasks: configure_os.yml
   when: configure_os_only
+
+- name: Molecule - Output default vars to file
+  delegate_to: localhost
+  template:
+    force: yes
+    src: ansible_role_vars.j2
+    dest: /tmp/sst_bf_role_vars_{{ ansible_hostname }}.yaml
+  when: molecule_test is defined and molecule_test

@@ -16,7 +16,7 @@
 ---
 - name: Ensure python3 is installed for Ubuntu
   raw: test -e /usr/bin/python3 || (apt -y update && apt install -fy python3)
-  when: ansible_distribution == 'Ubuntu'
+  when: ansible_distribution == 'Ubuntu' and not offline
 
 - name: Register base frequency file
   stat:
@@ -34,36 +34,72 @@
     name: msr
     state: present
 
-- name: Get current kernel release
-  command: uname -r
-  changed_when: false
-  register: kernel_release
-  when: ansible_distribution == 'Fedora' or
-        ansible_distribution == 'CentOS' or
-        ansible_distribution == 'RedHat'
+- name: Check if MSR loaded
+  block:
+    - name: Get current kernel release
+      command: uname -r
+      changed_when: false
+      register: kernel_release
 
-- name: Check for MSR kernel module
-  lineinfile:
-    name: "/boot/config-{{ kernel_release.stdout_lines[0] }}"
-    line: "CONFIG_X86_MSR=y"
-    state: present
-  check_mode: yes
-  when: ansible_distribution == 'Fedora' or
-        ansible_distribution == 'CentOS' or
-        ansible_distribution == 'RedHat'
+    - name: Register kernel config file
+      stat:
+        path: "/boot/config-{{ kernel_release.stdout_lines[0] }}"
+      register: kernel_config
 
-- name: Set folder name
+    - name: Check kernel config file exists
+      fail:
+        msg: "File '/boot/config-{{ kernel_release.stdout_lines[0] }}' doesnt exist"
+      when: not kernel_config.stat.exists
+
+    - name: Check for possible symbolic link attack
+      fail:
+        msg: "Possible symbolic link attack detected"
+      when: kernel_config.stat.islnk is defined and kernel_config.stat.islnk
+
+    - name: Check for MSR kernel module
+      lineinfile:
+        name: "/boot/config-{{ kernel_release.stdout_lines[0] }}"
+        line: "CONFIG_X86_MSR=y"
+        state: present
+      check_mode: yes
+  when: ansible_distribution != 'Ubuntu'
+
+- name: Create temporary directory
+  delegate_to: localhost
+  run_once: true
+  tempfile:
+    state: directory
+    suffix: sst_bf_ansible
+  register: tempfolder
+  when: not offline
+
+- name: Change permissions of temporary directory to ensure read & execute
+  delegate_to: localhost
+  run_once: true
+  file:
+    path: "{{ tempfolder.path }}"
+    mode: '0755'
+  when: not offline
+
+- name: Set folder name for temporary directory
+  run_once: true
   set_fact:
-    sst_bf_folder_name: "CommsPowerManagement"
+    repo_path: "{{ tempfolder.path }}"
+  when: not offline
+
+- name: Set offline folder directory
+  run_once: true
+  set_fact:
+    repo_path: /tmp/CommsPowerManagement
+  when: offline
 
 - name: Attempt to set and gather SST-BF information
-  become: yes
   block:
     - name: Pull SST-BF code from git
       run_once: true
       git:
         repo: https://github.com/intel/CommsPowerManagement.git
-        dest: "/tmp/{{ sst_bf_folder_name }}"
+        dest: "{{ repo_path }}"
         clone: yes
         force: yes
         accept_hostkey: yes
@@ -73,13 +109,13 @@
 
     - name: Register supporting script repository
       stat:
-        path: "/tmp/{{ sst_bf_folder_name }}"
+        path: "{{ repo_path }}"
       delegate_to: localhost
       register: support_repo_stat
 
     - name: Ensure supporting git repository is present
       fail:
-        msg: "Repository {{ sst_bf_folder_name }} does not exist in Ansible controllers /tmp"
+        msg: "Repository {{ repo_path }} does not exist in Ansible controller"
       when: not support_repo_stat.stat.exists
 
     - name: Check for possible symbolic link attack
@@ -89,7 +125,7 @@
 
     - name: Register supporting SST-BF python script
       stat:
-        path: "/tmp/{{ sst_bf_folder_name }}"
+        path: "{{ repo_path }}/sst_bf.py"
       delegate_to: localhost
       register: py_support_stat
 
@@ -105,21 +141,23 @@
 
     # See sst_bf.py -h for information about this config.
     - name: Set SST-BF profile for FIXED
-      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -s"
+      script: "{{ repo_path }}/sst_bf.py -s"
       when: sst_bf_profile == 'FREQUENCY_FIXED_HIGH_DEDICATED' or
             sst_bf_profile == 'FREQUENCY_FIXED_HIGH_SHARED'
 
     - name: Set SST-BF profile for VAR
-      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -a"
+      script: "{{ repo_path }}/sst_bf.py -a"
       when: sst_bf_profile == 'FREQUENCY_VAR_HIGH_DEDICATED' or
             sst_bf_profile == 'FREQUENCY_VAR_HIGH_SHARED'
 
     - name: Get high priority cores
-      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -l"
+      script: "{{ repo_path }}/sst_bf.py -l"
       changed_when: false
       register: high_cores
+      when: high_cores is not defined
 
     - name: Get normal priority cores
-      script: "/tmp/{{ sst_bf_folder_name }}/sst_bf.py -n"
+      script: "{{ repo_path }}/sst_bf.py -n"
       changed_when: false
       register: normal_cores
+      when: normal_cores is not defined
