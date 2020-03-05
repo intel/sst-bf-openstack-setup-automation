@@ -12,12 +12,6 @@ galaxy_info:
     - name: Ubuntu
       versions:
         - bionic
-    - name: EL
-      versions:
-        - 8
-    - name: Fedora
-      versions:
-        - all
 
   galaxy_tags:
     - openstack
