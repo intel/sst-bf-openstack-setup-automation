@@ -1,3 +1,14 @@
+DISCONTINUATION OF PROJECT
+
+This project will no longer be maintained by Intel.
+
+Intel has ceased development and contributions including, but not limited to, maintenance, bug fixes, new releases, or updates, to this project.  
+
+Intel no longer accepts patches to this project.
+
+If you have an ongoing need to use this project, are interested in independently developing it, or would like to maintain patches for the open source software community, please create your own fork of this project.  
+
+Contact: webadmin@linux.intel.com
 # Intel® Speed Select - Base Frequency for OpenStack - Setup Automation
 The code herein allows a data center administrator or high-level orchestration tool to use Ansible\* for provisioning OpenStack\* Nova compute servers with Intel® Speed Select - Base Frequency feature. Please read [Intel® Speed Select Technology – Base Frequency Configuration Automation on OpenStack* Compute Host](https://builders.intel.com/docs/networkbuilders/intel-speed-select-technology-base-frequency-configuration-automation-on-openstack-compute-host.pdf) Application note for more detailed information.
 
